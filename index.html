@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>实时聊天室</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script>
+</head>
+<body>
+  <div class="chat-app">
+    <div class="chat-header">
+      <h1>实时聊天室</h1>
+      <div>
+        <button id="settings-btn" class="create-group-btn">设置</button>
+        <button id="create-group-btn" class="create-group-btn">创建群聊</button>
+      </div>
+    </div>
+    <div class="chat-container">
+      <div class="chat-sidebar" id="chat-sidebar">
+        <h2>聊天</h2>
+      </div>
+      <div class="chat-main">
+        <div class="chat-messages" id="chat-messages"></div>
+        <div class="chat-input-area">
+          <input type="text" class="chat-input" id="chat-input" placeholder="输入消息...">
+          <button class="emoji-btn" id="emoji-btn">😊</button>
+          <button class="send-btn" id="send-btn">发送</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- 表情选择器 -->
+  <div class="emoji-picker" id="emoji-picker"></div>
+  
+  <!-- 创建群聊模态框 -->
+  <div class="modal" id="group-modal">
+    <div class="modal-content">
+      <h2>创建群聊</h2>
+      <input type="text" id="group-name" placeholder="输入群聊名称">
+      <div class="modal-buttons">
+        <button class="modal-btn cancel" id="cancel-group">取消</button>
+        <button class="modal-btn create" id="create-group-submit">创建</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- 设置模态框 -->
+  <div class="modal" id="settings-modal">
+    <div class="modal-content">
+      <h2>个人设置</h2>
+      <input type="text" id="nickname-input" placeholder="输入新昵称">
+      <div class="modal-buttons">
+        <button class="modal-btn cancel" id="cancel-settings">取消</button>
+        <button class="modal-btn create" id="save-settings">保存</button>
+      </div>
+    </div>
+  </div>
+  
+  <script src="script.js"></script>
+</body>
+</html>
