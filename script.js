@@ -400,7 +400,9 @@ function updateGroupInfoBar() {
   if (!currentChat || currentChat.type !== 'group') { groupInfoBar.style.display = 'none'; groupMgmtPanel.style.display = 'none'; return; }
   groupInfoBar.style.display = 'flex';
   groupInfoName.textContent = currentChat.name;
-  groupInfoCount.textContent = `${(currentChat.members || []).length} 人`;
+  groupInfoCount.textContent = currentChat.id === 'world-chat' ? '公开群聊' : `${(currentChat.members || []).length} 人`;
+  // 世界群聊隐藏管理按钮
+  toggleMgmtBtn.style.display = currentChat.id === 'world-chat' ? 'none' : 'inline-block';
 }
 
 // ========================================================================
@@ -460,6 +462,11 @@ chatInput.addEventListener('keypress', e => { if (e.key === 'Enter') sendMessage
 function sendMessage() {
   const text = chatInput.value.trim();
   if (!text || !currentChat || !currentUser) return;
+  // 权限校验：非公开群聊必须是成员才能发消息
+  if (currentChat.type === 'group' && !currentChat.public && (!currentChat.members || !currentChat.members.includes(currentUser.uid))) {
+    alert('你不是该群聊的成员，无法发送消息');
+    return;
+  }
   db.ref('messages').push({
     chatId: currentChat.id, senderId: currentUser.uid,
     senderName: currentUser.displayName, text,
@@ -473,12 +480,10 @@ function loadChats() {
   chatsListenerRef = db.ref('chats');
   chatsListenerCallback = snap => {
     const nc = [];
-    snap.forEach(c => { const ch = c.val(); ch.id = c.key; if (ch.type === 'group' || (ch.type === 'private' && ch.members && ch.members.includes(currentUser.uid))) nc.push(ch); });
+    snap.forEach(c => { const ch = c.val(); ch.id = c.key; if ((ch.type === 'group' && (ch.public || (ch.members && ch.members.includes(currentUser.uid)))) || (ch.type === 'private' && ch.members && ch.members.includes(currentUser.uid))) nc.push(ch); });
+    // 世界群聊常驻，始终排在第一位
+    nc.unshift({ id: 'world-chat', name: '世界群聊', type: 'group', public: true, members: [] });
     chats = nc;
-    if (chats.length === 0 && snap.numChildren() === 0) {
-      db.ref('chats').push({ name: '世界群聊', type: 'group', members: [currentUser.uid], createdBy: currentUser.uid, createdAt: firebase.database.ServerValue.TIMESTAMP })
-        .catch(err => console.error('创建默认群聊失败:', err));
-    }
     renderChatList(); renderFriendsList();
     if (currentChat && currentChat.type === 'group') { const u = chats.find(c => c.id === currentChat.id); if (u) { currentChat = u; updateGroupInfoBar(); } }
   };
