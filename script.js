@@ -195,28 +195,42 @@ saveSettings.addEventListener('click', () => {
 friendSearchBtn.addEventListener('click', () => {
   const name = friendSearchInput.value.trim();
   if (!name || !currentUser) return;
-  const targetUid = uidFromName(name);
-  if (targetUid === currentUser.uid) { friendSearchResults.innerHTML = '<div class="search-result-item">不能添加自己为好友</div>'; return; }
-  if (friends.some(f => f.uid === targetUid)) { friendSearchResults.innerHTML = `<div class="search-result-item">${escapeHtml(name)} 已经是你的好友了</div>`; return; }
 
-  db.ref('users/' + targetUid).once('value').then(snap => {
-    const u = snap.val();
-    const dn = u ? u.displayName : name;
-    const av = u ? u.avatar : '';
-    return db.ref('friendRequests/' + targetUid + '/' + currentUser.uid).once('value').then(reqSnap => {
-      if (reqSnap.exists()) { friendSearchResults.innerHTML = `<div class="search-result-item">已向 ${escapeHtml(dn)} 发送过请求</div>`; return; }
-      friendSearchResults.innerHTML = '';
+  friendSearchResults.innerHTML = '<div class="search-result-item">搜索中...</div>';
+
+  // 按 displayName 模糊查询（不区分大小写）
+  db.ref('users').once('value').then(snap => {
+    friendSearchResults.innerHTML = '';
+    const lowerName = name.toLowerCase();
+    let found = 0;
+    snap.forEach(child => {
+      const u = child.val();
+      const uid = child.key;
+      if (uid === currentUser.uid) return; // 跳过自己
+      if (!u.displayName || !u.displayName.toLowerCase().includes(lowerName)) return; // 不匹配
+      found++;
+
+      if (friends.some(f => f.uid === uid)) {
+        // 已是好友
+        const item = document.createElement('div');
+        item.className = 'search-result-item';
+        item.innerHTML = `<img src="${getAvatarUrl(u)}" class="search-result-avatar" alt=""><span class="search-result-name">${escapeHtml(u.displayName)}</span><span style="color:#999;font-size:13px">已是好友</span>`;
+        friendSearchResults.appendChild(item);
+        return;
+      }
+
       const item = document.createElement('div');
       item.className = 'search-result-item';
-      item.innerHTML = `<img src="${getAvatarUrl({avatar:av})}" class="search-result-avatar" alt=""><span class="search-result-name">${escapeHtml(dn)}</span><button class="modal-btn create send-request-btn">添加</button>`;
+      item.innerHTML = `<img src="${getAvatarUrl(u)}" class="search-result-avatar" alt=""><span class="search-result-name">${escapeHtml(u.displayName)}</span><button class="modal-btn create send-request-btn">添加</button>`;
       item.querySelector('.send-request-btn').addEventListener('click', () => {
-        db.ref('friendRequests/' + targetUid + '/' + currentUser.uid).set({
+        db.ref('friendRequests/' + uid + '/' + currentUser.uid).set({
           fromUid: currentUser.uid, fromName: currentUser.displayName, fromAvatar: currentUser.avatar || '', timestamp: firebase.database.ServerValue.TIMESTAMP
-        }).then(() => { item.innerHTML = `<span class="search-result-name">${escapeHtml(dn)}</span><span style="color:#28a745;font-size:13px">✓ 请求已发送</span>`; })
+        }).then(() => { item.querySelector('.send-request-btn').outerHTML = '<span style="color:#28a745;font-size:13px">✓ 已发送</span>'; })
           .catch(err => console.error('发送好友请求失败:', err));
       });
       friendSearchResults.appendChild(item);
     });
+    if (found === 0) { friendSearchResults.innerHTML = '<div class="search-result-item">未找到匹配的用户</div>'; }
   }).catch(err => { console.error('搜索用户失败:', err); friendSearchResults.innerHTML = '<div class="search-result-item">搜索失败，请重试</div>'; });
 });
 
