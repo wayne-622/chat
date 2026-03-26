@@ -105,7 +105,7 @@ settingsBtn.addEventListener('click', () => {
     if (currentUser.avatar) {
       avatarImg.src = currentUser.avatar;
     } else {
-      avatarImg.src = 'https://via.placeholder.com/100';
+      avatarImg.src = 'https://pub-141831e61e69445289222976a15b6fb3.r2.dev/Image_to_url_V2/-----2026-03-26-101455-imagetourl.cloud-1774491309403-grw8d7.png';
     }
   }
   settingsModal.classList.add('show');
@@ -133,18 +133,21 @@ saveSettings.addEventListener('click', () => {
 searchBtn.addEventListener('click', () => {
   const searchTerm = userSearch.value.trim();
   if (searchTerm && currentUser) {
+    // 基于用户名生成固定的用户ID，避免重复创建
+    const foundUserUid = 'user_' + btoa(searchTerm).replace(/[^a-zA-Z0-9]/g, '').substring(0, 20);
+    
     // 模拟搜索用户（实际项目中应该从Firebase数据库中查询）
     const foundUser = {
-      uid: 'user_' + Date.now(),
+      uid: foundUserUid,
       displayName: searchTerm,
-      avatar: 'https://via.placeholder.com/100'
+      avatar: 'https://pub-141831e61e69445289222976a15b6fb3.r2.dev/Image_to_url_V2/-----2026-03-26-101455-imagetourl.cloud-1774491309403-grw8d7.png'
     };
     
-    // 检查是否已存在私聊
+    // 检查是否已存在私聊（基于用户名查找）
     const existingChat = chats.find(chat => 
       chat.type === 'private' && 
-      chat.members.includes(currentUser.uid) && 
-      chat.members.includes(foundUser.uid)
+      chat.name === searchTerm &&
+      chat.members.includes(currentUser.uid)
     );
     
     if (existingChat) {
@@ -233,8 +236,24 @@ function loadChats() {
     snapshot.forEach((childSnapshot) => {
       const chat = childSnapshot.val();
       chat.id = childSnapshot.key;
-      chats.push(chat);
+      // 只添加当前用户有权限的聊天
+      // 群聊：所有用户都可以看到
+      // 私聊：只有成员可以看到
+      if ((chat.type === 'group') || 
+          (chat.type === 'private' && chat.members && chat.members.includes(currentUser.uid))) {
+        chats.push(chat);
+      }
     });
+    // 如果没有聊天，创建默认群聊
+    if (chats.length === 0) {
+      const defaultGroup = {
+        name: '世界群聊',
+        type: 'group',
+        members: [currentUser.uid],
+        createdAt: firebase.database.ServerValue.TIMESTAMP
+      };
+      db.ref('chats').push(defaultGroup);
+    }
     renderChatList();
   });
 }
@@ -282,7 +301,17 @@ function loadMessages() {
     chatMessages.innerHTML = '';
     snapshot.forEach((childSnapshot) => {
       const message = childSnapshot.val();
-      renderMessage(message);
+      // 检查当前用户是否有权限查看此消息
+      // 群聊：所有用户都可以看到
+      // 私聊：只有消息发送者和接收者可以看到
+      if (currentChat.type === 'group' || 
+          (currentChat.type === 'private' && 
+           (message.senderId === currentUser.uid || 
+            (currentChat.members && currentChat.members.includes(currentUser.uid)))) {
+
+
+        renderMessage(message);
+      }
     });
     chatMessages.scrollTop = chatMessages.scrollHeight;
   });
@@ -290,11 +319,9 @@ function loadMessages() {
 
 // 渲染消息
 function renderMessage(message) {
+  const isSent = message.senderId === currentUser.uid;
   const messageElement = document.createElement('div');
-  messageElement.className = `message ${message.senderId === currentUser.uid ? 'sent' : 'received'}`;
-  
-  const isRead = message.readBy && message.readBy[currentUser.uid];
-  const statusClass = message.senderId === currentUser.uid ? (isRead ? 'read' : 'sent') : '';
+  messageElement.className = `message ${isSent ? 'sent' : 'received'}`;
   
   // 处理消息内容，支持图片和链接
   let messageContent = message.text;
@@ -307,22 +334,36 @@ function renderMessage(message) {
   const linkRegex = /(https?:\/\/(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&\/=]*))/i;
   messageContent = messageContent.replace(linkRegex, '<a href="$1" target="_blank">$1</a>');
   
-  // 群聊显示已读未读人数
+  // 群聊显示已读未读人数，私聊显示已读/未读状态
   let readStatus = '';
-  if (currentChat && currentChat.type === 'group') {
-    const readCount = message.readBy ? Object.keys(message.readBy).length : 0;
-    // 使用实际的群聊成员数
-    const totalMembers = currentChat.members ? currentChat.members.length : 1;
-    const unreadCount = totalMembers - readCount;
-    readStatus = `<div class="message-read-status">${readCount}已读 ${unreadCount}未读</div>`;
-  } else if (message.senderId === currentUser.uid) {
-    readStatus = `<div class="message-status">${isRead ? '已读' : '已发送'}</div>`;
+  if (isSent) {
+    if (currentChat && currentChat.type === 'group') {
+      // 群聊：显示已读未读人数
+      const readCount = message.readBy ? Object.keys(message.readBy).length : 0;
+      const totalMembers = currentChat.members ? currentChat.members.length : 1;
+      const unreadCount = totalMembers - readCount;
+      readStatus = `<div class="message-read-status">${readCount}已读 ${unreadCount}未读</div>`;
+    } else {
+      // 私聊：显示已读/未读
+      const isReadByOther = message.readBy && Object.keys(message.readBy).some(uid => uid !== currentUser.uid);
+      readStatus = `<div class="message-status">${isReadByOther ? '已读' : '未读'}</div>`;
+    }
   }
   
+  // 获取头像（自己的消息显示自己的头像，别人的消息显示发送者的头像）
+  const avatarUrl = isSent ? (currentUser.avatar || 'https://pub-141831e61e69445289222976a15b6fb3.r2.dev/Image_to_url_V2/-----2026-03-26-101455-imagetourl.cloud-1774491309403-grw8d7.png') : 'https://pub-141831e61e69445289222976a15b6fb3.r2.dev/Image_to_url_V2/-----2026-03-26-101455-imagetourl.cloud-1774491309403-grw8d7.png';
+  
   messageElement.innerHTML = `
-    <div class="message-sender">${message.senderName}</div>
-    <div class="message-content">${messageContent}</div>
-    ${readStatus}
+    <div class="message-avatar">
+      <img src="${avatarUrl}" alt="头像">
+    </div>
+    <div class="message-body">
+      <div class="message-sender">${message.senderName}</div>
+      <div class="message-content-wrapper">
+        ${isSent ? readStatus : ''}
+        <div class="message-content">${messageContent}</div>
+      </div>
+    </div>
   `;
   
   chatMessages.appendChild(messageElement);
@@ -369,15 +410,22 @@ function markChatAsRead() {
 
 // 模拟用户登录（实际项目中应该使用Firebase Auth）
 function simulateLogin() {
-  // 从本地存储读取用户昵称和头像
+  // 从本地存储读取用户信息
+  let savedUid = localStorage.getItem('userUid');
   const savedNickname = localStorage.getItem('userNickname');
   const savedAvatar = localStorage.getItem('userAvatar');
   
+  // 如果没有保存的UID，生成一个新的并保存
+  if (!savedUid) {
+    savedUid = 'user_' + Date.now();
+    localStorage.setItem('userUid', savedUid);
+  }
+  
   // 模拟用户信息
   currentUser = {
-    uid: 'user_' + Date.now(),
+    uid: savedUid,
     displayName: savedNickname || '用户' + Math.floor(Math.random() * 1000),
-    avatar: savedAvatar || 'https://via.placeholder.com/100'
+    avatar: savedAvatar || 'https://pub-141831e61e69445289222976a15b6fb3.r2.dev/Image_to_url_V2/-----2026-03-26-101455-imagetourl.cloud-1774491309403-grw8d7.png'
   };
   
   // 初始化默认群聊
