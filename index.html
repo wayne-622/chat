@@ -21,6 +21,18 @@
     <div class="chat-container">
       <div class="chat-sidebar" id="chat-sidebar">
         <h2>聊天</h2>
+        <div class="sidebar-section">
+          <h3>群聊</h3>
+          <div id="group-chats"></div>
+        </div>
+        <div class="sidebar-section">
+          <h3>私聊</h3>
+          <div class="search-container">
+            <input type="text" id="user-search" placeholder="搜索用户...">
+            <button id="search-btn">搜索</button>
+          </div>
+          <div id="private-chats"></div>
+        </div>
       </div>
       <div class="chat-main">
         <div class="chat-messages" id="chat-messages"></div>
@@ -52,6 +64,13 @@
   <div class="modal" id="settings-modal">
     <div class="modal-content">
       <h2>个人设置</h2>
+      <div class="avatar-section">
+        <div class="avatar-preview" id="avatar-preview">
+          <img id="avatar-img" src="https://via.placeholder.com/100" alt="头像">
+        </div>
+        <input type="file" id="avatar-upload" accept="image/*">
+        <label for="avatar-upload">上传头像</label>
+      </div>
       <input type="text" id="nickname-input" placeholder="输入新昵称">
       <div class="modal-buttons">
         <button class="modal-btn cancel" id="cancel-settings">取消</button>

@@ -36,6 +36,12 @@ const settingsModal = document.getElementById('settings-modal');
 const nicknameInput = document.getElementById('nickname-input');
 const saveSettings = document.getElementById('save-settings');
 const cancelSettings = document.getElementById('cancel-settings');
+const userSearch = document.getElementById('user-search');
+const searchBtn = document.getElementById('search-btn');
+const groupChats = document.getElementById('group-chats');
+const privateChats = document.getElementById('private-chats');
+const avatarUpload = document.getElementById('avatar-upload');
+const avatarImg = document.getElementById('avatar-img');
 
 // 表情符号列表
 const emojis = ['😀', '😃', '😄', '😁', '😆', '😅', '😂', '🤣', '😊', '😇', '🙂', '🙃', '😉', '😌', '😍', '🥰', '😘', '😗', '😙', '😚', '😋', '😛', '😝', '😜', '🤪', '🤨', '🧐', '🤓', '😎', '🤩', '🥳', '😏', '😒', '😞', '😔', '😟', '😕', '🙁', '☹️', '😣', '😖', '😫', '😩', '🥺', '😢', '😭', '😤', '😠', '😡', '🤬', '🤯', '😳', '🥵', '🥶', '😱', '😨', '😰', '😥', '😓', '🤗', '🤔', '🤭', '🤫', '🤥', '😶', '😐', '😑', '😬', '🙄', '😯', '😦', '😧', '😮', '😲', '🥱', '😴', '🤤', '😪', '😵', '🤐', '🥴', '🤢', '🤮', '🤧', '😷', '🤒', '🤕', '🤑', '🤠', '😈', '👿', '👹', '👺', '🤡', '💩', '👻', '💀', '☠️', '👽', '👾', '🤖', '🎃', '😺', '😸', '😹', '😻', '😼', '😽', '🙀', '😿', '😾'];
@@ -77,10 +83,30 @@ cancelGroup.addEventListener('click', () => {
   groupNameInput.value = '';
 });
 
+// 头像上传预览
+avatarUpload.addEventListener('change', (e) => {
+  if (e.target.files && e.target.files[0]) {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      avatarImg.src = event.target.result;
+      if (currentUser) {
+        currentUser.avatar = event.target.result;
+        localStorage.setItem('userAvatar', event.target.result);
+      }
+    };
+    reader.readAsDataURL(e.target.files[0]);
+  }
+});
+
 // 打开设置模态框
 settingsBtn.addEventListener('click', () => {
   if (currentUser) {
     nicknameInput.value = currentUser.displayName;
+    if (currentUser.avatar) {
+      avatarImg.src = currentUser.avatar;
+    } else {
+      avatarImg.src = 'https://via.placeholder.com/100';
+    }
   }
   settingsModal.classList.add('show');
 });
@@ -95,9 +121,53 @@ saveSettings.addEventListener('click', () => {
   const newNickname = nicknameInput.value.trim();
   if (newNickname && currentUser) {
     currentUser.displayName = newNickname;
-    // 这里可以将新昵称保存到Firebase或本地存储
     localStorage.setItem('userNickname', newNickname);
+    if (currentUser.avatar) {
+      localStorage.setItem('userAvatar', currentUser.avatar);
+    }
     settingsModal.classList.remove('show');
+  }
+});
+
+// 搜索用户
+searchBtn.addEventListener('click', () => {
+  const searchTerm = userSearch.value.trim();
+  if (searchTerm && currentUser) {
+    // 模拟搜索用户（实际项目中应该从Firebase数据库中查询）
+    const foundUser = {
+      uid: 'user_' + Date.now(),
+      displayName: searchTerm,
+      avatar: 'https://via.placeholder.com/100'
+    };
+    
+    // 检查是否已存在私聊
+    const existingChat = chats.find(chat => 
+      chat.type === 'private' && 
+      chat.members.includes(currentUser.uid) && 
+      chat.members.includes(foundUser.uid)
+    );
+    
+    if (existingChat) {
+      selectChat(existingChat);
+    } else {
+      // 创建新的私聊
+      const newPrivateChat = {
+        type: 'private',
+        name: foundUser.displayName,
+        members: [currentUser.uid, foundUser.uid],
+        createdAt: firebase.database.ServerValue.TIMESTAMP
+      };
+      
+      db.ref('chats').push(newPrivateChat).then((snapshot) => {
+        const chat = newPrivateChat;
+        chat.id = snapshot.key;
+        chats.push(chat);
+        renderChatList();
+        selectChat(chat);
+      });
+    }
+    
+    userSearch.value = '';
   }
 });
 
@@ -131,6 +201,13 @@ chatInput.addEventListener('keypress', (e) => {
 function sendMessage() {
   const messageText = chatInput.value.trim();
   if (messageText && currentChat && currentUser) {
+    // 检查是否包含图片URL
+    const imageRegex = /(https?:\/\/.*\.(?:png|jpg|jpeg|gif|webp))/i;
+    const imageMatch = messageText.match(imageRegex);
+    
+    // 检查是否包含链接
+    const linkRegex = /(https?:\/\/(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&\/=]*))/i;
+    
     const message = {
       id: Date.now().toString(),
       chatId: currentChat.id,
@@ -164,7 +241,9 @@ function loadChats() {
 
 // 渲染聊天列表
 function renderChatList() {
-  chatSidebar.innerHTML = '<h2>聊天</h2>';
+  groupChats.innerHTML = '';
+  privateChats.innerHTML = '';
+  
   chats.forEach(chat => {
     const chatItem = document.createElement('div');
     chatItem.className = `chat-item ${currentChat && currentChat.id === chat.id ? 'active' : ''}`;
@@ -175,7 +254,13 @@ function renderChatList() {
     chatItem.addEventListener('click', () => {
       selectChat(chat);
     });
-    chatSidebar.appendChild(chatItem);
+    
+    if (chat.type === 'group') {
+      groupChats.appendChild(chatItem);
+    } else {
+      privateChats.appendChild(chatItem);
+    }
+    
     updateUnreadCount(chat.id);
   });
 }
@@ -211,10 +296,33 @@ function renderMessage(message) {
   const isRead = message.readBy && message.readBy[currentUser.uid];
   const statusClass = message.senderId === currentUser.uid ? (isRead ? 'read' : 'sent') : '';
   
+  // 处理消息内容，支持图片和链接
+  let messageContent = message.text;
+  
+  // 处理图片URL
+  const imageRegex = /(https?:\/\/.*\.(?:png|jpg|jpeg|gif|webp))/i;
+  messageContent = messageContent.replace(imageRegex, '<img src="$1" alt="图片">');
+  
+  // 处理普通链接
+  const linkRegex = /(https?:\/\/(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&\/=]*))/i;
+  messageContent = messageContent.replace(linkRegex, '<a href="$1" target="_blank">$1</a>');
+  
+  // 群聊显示已读未读人数
+  let readStatus = '';
+  if (currentChat && currentChat.type === 'group') {
+    const readCount = message.readBy ? Object.keys(message.readBy).length : 0;
+    // 使用实际的群聊成员数
+    const totalMembers = currentChat.members ? currentChat.members.length : 1;
+    const unreadCount = totalMembers - readCount;
+    readStatus = `<div class="message-read-status">${readCount}已读 ${unreadCount}未读</div>`;
+  } else if (message.senderId === currentUser.uid) {
+    readStatus = `<div class="message-status">${isRead ? '已读' : '已发送'}</div>`;
+  }
+  
   messageElement.innerHTML = `
     <div class="message-sender">${message.senderName}</div>
-    <div class="message-content">${message.text}</div>
-    ${message.senderId === currentUser.uid ? `<div class="message-status">${isRead ? '已读' : '已发送'}</div>` : ''}
+    <div class="message-content">${messageContent}</div>
+    ${readStatus}
   `;
   
   chatMessages.appendChild(messageElement);
@@ -261,19 +369,21 @@ function markChatAsRead() {
 
 // 模拟用户登录（实际项目中应该使用Firebase Auth）
 function simulateLogin() {
-  // 从本地存储读取用户昵称
+  // 从本地存储读取用户昵称和头像
   const savedNickname = localStorage.getItem('userNickname');
+  const savedAvatar = localStorage.getItem('userAvatar');
   
   // 模拟用户信息
   currentUser = {
     uid: 'user_' + Date.now(),
-    displayName: savedNickname || '用户' + Math.floor(Math.random() * 1000)
+    displayName: savedNickname || '用户' + Math.floor(Math.random() * 1000),
+    avatar: savedAvatar || 'https://via.placeholder.com/100'
   };
   
   // 初始化默认群聊
   const defaultGroup = {
     id: 'default',
-    name: '默认群聊',
+    name: '世界群聊',
     type: 'group',
     members: [currentUser.uid],
     createdAt: firebase.database.ServerValue.TIMESTAMP
