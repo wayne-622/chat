@@ -9,448 +9,603 @@ const firebaseConfig = {
   measurementId: "G-75HB9F9QYJ"
 };
 
-// 初始化Firebase
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
-const auth = firebase.auth();
 
 // 全局变量
 let currentUser = null;
 let currentChat = null;
 let chats = [];
+let friends = [];
 
-// DOM元素
-const chatMessages = document.getElementById('chat-messages');
-const chatInput = document.getElementById('chat-input');
-const sendBtn = document.getElementById('send-btn');
-const emojiBtn = document.getElementById('emoji-btn');
-const emojiPicker = document.getElementById('emoji-picker');
-const createGroupBtn = document.getElementById('create-group-btn');
-const groupModal = document.getElementById('group-modal');
-const groupNameInput = document.getElementById('group-name');
-const createGroupSubmit = document.getElementById('create-group-submit');
-const cancelGroup = document.getElementById('cancel-group');
-const chatSidebar = document.getElementById('chat-sidebar');
-const settingsBtn = document.getElementById('settings-btn');
-const settingsModal = document.getElementById('settings-modal');
-const nicknameInput = document.getElementById('nickname-input');
-const saveSettings = document.getElementById('save-settings');
-const cancelSettings = document.getElementById('cancel-settings');
-const userSearch = document.getElementById('user-search');
-const searchBtn = document.getElementById('search-btn');
-const groupChats = document.getElementById('group-chats');
-const privateChats = document.getElementById('private-chats');
-const avatarUpload = document.getElementById('avatar-upload');
-const avatarImg = document.getElementById('avatar-img');
+// 监听器跟踪
+let activeMessagesRef = null;
+let activeMessagesCallback = null;
+const unreadListeners = {};
+let chatsListenerRef = null;
+let chatsListenerCallback = null;
+let friendsListenerRef = null;
+let friendsListenerCallback = null;
+let requestsListenerRef = null;
+let requestsListenerCallback = null;
 
-// 表情符号列表
-const emojis = ['😀', '😃', '😄', '😁', '😆', '😅', '😂', '🤣', '😊', '😇', '🙂', '🙃', '😉', '😌', '😍', '🥰', '😘', '😗', '😙', '😚', '😋', '😛', '😝', '😜', '🤪', '🤨', '🧐', '🤓', '😎', '🤩', '🥳', '😏', '😒', '😞', '😔', '😟', '😕', '🙁', '☹️', '😣', '😖', '😫', '😩', '🥺', '😢', '😭', '😤', '😠', '😡', '🤬', '🤯', '😳', '🥵', '🥶', '😱', '😨', '😰', '😥', '😓', '🤗', '🤔', '🤭', '🤫', '🤥', '😶', '😐', '😑', '😬', '🙄', '😯', '😦', '😧', '😮', '😲', '🥱', '😴', '🤤', '😪', '😵', '🤐', '🥴', '🤢', '🤮', '🤧', '😷', '🤒', '🤕', '🤑', '🤠', '😈', '👿', '👹', '👺', '🤡', '💩', '👻', '💀', '☠️', '👽', '👾', '🤖', '🎃', '😺', '😸', '😹', '😻', '😼', '😽', '🙀', '😿', '😾'];
+// 用户信息缓存（uid → {displayName, avatar}），用于已读列表实时显示最新昵称
+const userInfoCache = {};
 
-// 初始化表情选择器
-function initEmojiPicker() {
-  emojis.forEach(emoji => {
-    const emojiItem = document.createElement('div');
-    emojiItem.className = 'emoji-item';
-    emojiItem.textContent = emoji;
-    emojiItem.addEventListener('click', () => {
-      chatInput.value += emoji;
-      emojiPicker.classList.remove('show');
-    });
-    emojiPicker.appendChild(emojiItem);
+// ====== DOM ======
+const $ = id => document.getElementById(id);
+const chatMessages = $('chat-messages');
+const chatInput = $('chat-input');
+const sendBtn = $('send-btn');
+const emojiBtn = $('emoji-btn');
+const emojiPicker = $('emoji-picker');
+const createGroupBtn = $('create-group-btn');
+const groupModal = $('group-modal');
+const groupNameInput = $('group-name');
+const createGroupSubmit = $('create-group-submit');
+const cancelGroup = $('cancel-group');
+const settingsBtn = $('settings-btn');
+const settingsModal = $('settings-modal');
+const nicknameInput = $('nickname-input');
+const saveSettings = $('save-settings');
+const cancelSettings = $('cancel-settings');
+const groupChats = $('group-chats');
+const friendsList = $('friends-list');
+const avatarUpload = $('avatar-upload');
+const avatarImg = $('avatar-img');
+const addFriendBtn = $('add-friend-btn');
+const addFriendModal = $('add-friend-modal');
+const friendSearchInput = $('friend-search-input');
+const friendSearchBtn = $('friend-search-btn');
+const friendSearchResults = $('friend-search-results');
+const cancelAddFriend = $('cancel-add-friend');
+const friendRequestsBtn = $('friend-requests-btn');
+const friendRequestsModal = $('friend-requests-modal');
+const friendRequestsList = $('friend-requests-list');
+const cancelFriendRequests = $('cancel-friend-requests');
+const groupFriendList = $('group-friend-list');
+const requestBadge = $('request-badge');
+const chatInputArea = $('chat-input-area');
+const groupInfoBar = $('group-info-bar');
+const groupInfoName = $('group-info-name');
+const groupInfoCount = $('group-info-count');
+const toggleMgmtBtn = $('toggle-mgmt-btn');
+const groupMgmtPanel = $('group-mgmt-panel');
+const mgmtMemberCount = $('mgmt-member-count');
+const mgmtMembersList = $('mgmt-members-list');
+const mgmtInviteList = $('mgmt-invite-list');
+const mgmtDeleteSection = $('mgmt-delete-section');
+const deleteGroupBtn = $('delete-group-btn');
+const readStatusModal = $('read-status-modal');
+const readCountDisplay = $('read-count-display');
+const unreadCountDisplay = $('unread-count-display');
+const readMembersList = $('read-members-list');
+const unreadMembersList = $('unread-members-list');
+const cancelReadStatus = $('cancel-read-status');
+const deleteConfirmModal = $('delete-confirm-modal');
+const cancelDelete = $('cancel-delete');
+const confirmDelete = $('confirm-delete');
+
+// ====== 工具函数 ======
+function escapeHtml(text) {
+  const d = document.createElement('div');
+  d.textContent = text;
+  return d.innerHTML;
+}
+
+function getAvatarUrl(user) {
+  return (user && user.avatar) || 'https://pub-141831e61e69445289222976a15b6fb3.r2.dev/Image_to_url_V2/-----2026-03-26-101455-imagetourl.cloud-1774491309403-grw8d7.png';
+}
+
+function uidFromName(name) {
+  return 'user_' + btoa(name).replace(/[^a-zA-Z0-9]/g, '').substring(0, 20);
+}
+
+// 获取用户信息（带缓存，优先返回 Firebase 最新数据）
+function getUserInfo(uid) {
+  // 如果是当前用户，直接返回
+  if (currentUser && uid === currentUser.uid) {
+    return Promise.resolve({ uid, displayName: currentUser.displayName, avatar: currentUser.avatar });
+  }
+  // 缓存命中直接返回
+  if (userInfoCache[uid]) {
+    return Promise.resolve({ uid, ...userInfoCache[uid] });
+  }
+  return db.ref('users/' + uid).once('value').then(snap => {
+    const data = snap.val() || {};
+    userInfoCache[uid] = { displayName: data.displayName || '未知用户', avatar: data.avatar || '' };
+    return { uid, ...userInfoCache[uid] };
   });
 }
 
-// 切换表情选择器显示状态
-emojiBtn.addEventListener('click', () => {
-  emojiPicker.classList.toggle('show');
+// 批量获取用户信息
+function batchGetUserInfo(uids) {
+  return Promise.all(uids.map(uid => getUserInfo(uid)));
+}
+
+// ====== 表情选择器 ======
+const emojis = ['😀','😃','😄','😁','😆','😅','😂','🤣','😊','😇','🙂','🙃','😉','😌','😍','🥰','😘','😗','😙','😚','😋','😛','😝','😜','🤪','🤨','🧐','🤓','😎','🤩','🥳','😏','😒','😞','😔','😟','😕','🙁','☹️','😣','😖','😫','😩','🥺','😢','😭','😤','😠','😡','🤬','🤯','😳','🥵','🥶','😱','😨','😰','😥','😓','🤗','🤔','🤭','🤫','🤥','😶','😐','😑','😬','🙄','😯','😦','😧','😮','😲','🥱','😴','🤤','😪','😵','🤐','🥴','🤢','🤮','🤧','😷','🤒','🤕','🤑','🤠','😈','👿','👹','👺','🤡','💩','👻','💀','☠️','👽','👾','🤖','🎃','😺','😸','😹','😻','😼','😽','🙀','😿','😾'];
+
+function initEmojiPicker() {
+  emojis.forEach(emoji => {
+    const item = document.createElement('div');
+    item.className = 'emoji-item';
+    item.textContent = emoji;
+    item.addEventListener('click', () => {
+      chatInput.value += emoji;
+      emojiPicker.classList.remove('show');
+    });
+    emojiPicker.appendChild(item);
+  });
+}
+
+emojiBtn.addEventListener('click', e => { e.stopPropagation(); emojiPicker.classList.toggle('show'); });
+document.addEventListener('click', e => {
+  if (!emojiBtn.contains(e.target) && !emojiPicker.contains(e.target)) emojiPicker.classList.remove('show');
 });
 
-// 点击其他地方关闭表情选择器
-document.addEventListener('click', (e) => {
-  if (!emojiBtn.contains(e.target) && !emojiPicker.contains(e.target)) {
-    emojiPicker.classList.remove('show');
-  }
+// ====== 模态框开关 ======
+addFriendBtn.addEventListener('click', () => { friendSearchInput.value = ''; friendSearchResults.innerHTML = ''; addFriendModal.classList.add('show'); });
+cancelAddFriend.addEventListener('click', () => addFriendModal.classList.remove('show'));
+friendRequestsBtn.addEventListener('click', () => { renderFriendRequests(); friendRequestsModal.classList.add('show'); });
+cancelFriendRequests.addEventListener('click', () => friendRequestsModal.classList.remove('show'));
+createGroupBtn.addEventListener('click', () => { groupNameInput.value = ''; renderGroupFriendPicker(); groupModal.classList.add('show'); });
+cancelGroup.addEventListener('click', () => groupModal.classList.remove('show'));
+settingsBtn.addEventListener('click', () => { if (currentUser) { nicknameInput.value = currentUser.displayName; avatarImg.src = getAvatarUrl(currentUser); } settingsModal.classList.add('show'); });
+cancelSettings.addEventListener('click', () => settingsModal.classList.remove('show'));
+cancelReadStatus.addEventListener('click', () => readStatusModal.classList.remove('show'));
+cancelDelete.addEventListener('click', () => deleteConfirmModal.classList.remove('show'));
+
+document.querySelectorAll('.modal').forEach(modal => {
+  modal.addEventListener('click', e => { if (e.target === modal) modal.classList.remove('show'); });
 });
 
-// 打开创建群聊模态框
-createGroupBtn.addEventListener('click', () => {
-  groupModal.classList.add('show');
-});
-
-// 关闭创建群聊模态框
-cancelGroup.addEventListener('click', () => {
-  groupModal.classList.remove('show');
-  groupNameInput.value = '';
-});
-
-// 头像上传预览
-avatarUpload.addEventListener('change', (e) => {
+// ====== 头像上传 ======
+avatarUpload.addEventListener('change', e => {
   if (e.target.files && e.target.files[0]) {
     const reader = new FileReader();
-    reader.onload = (event) => {
-      avatarImg.src = event.target.result;
-      if (currentUser) {
-        currentUser.avatar = event.target.result;
-        localStorage.setItem('userAvatar', event.target.result);
-      }
+    reader.onload = ev => {
+      avatarImg.src = ev.target.result;
+      if (currentUser) { currentUser.avatar = ev.target.result; localStorage.setItem('userAvatar', ev.target.result); }
     };
     reader.readAsDataURL(e.target.files[0]);
   }
 });
 
-// 打开设置模态框
-settingsBtn.addEventListener('click', () => {
-  if (currentUser) {
-    nicknameInput.value = currentUser.displayName;
-    if (currentUser.avatar) {
-      avatarImg.src = currentUser.avatar;
-    } else {
-      avatarImg.src = 'https://pub-141831e61e69445289222976a15b6fb3.r2.dev/Image_to_url_V2/-----2026-03-26-101455-imagetourl.cloud-1774491309403-grw8d7.png';
-    }
-  }
-  settingsModal.classList.add('show');
-});
-
-// 关闭设置模态框
-cancelSettings.addEventListener('click', () => {
-  settingsModal.classList.remove('show');
-});
-
-// 保存设置
+// ====== 保存设置 ======
 saveSettings.addEventListener('click', () => {
-  const newNickname = nicknameInput.value.trim();
-  if (newNickname && currentUser) {
-    currentUser.displayName = newNickname;
-    localStorage.setItem('userNickname', newNickname);
-    if (currentUser.avatar) {
-      localStorage.setItem('userAvatar', currentUser.avatar);
-    }
+  const nn = nicknameInput.value.trim();
+  if (nn && currentUser) {
+    currentUser.displayName = nn;
+    localStorage.setItem('userNickname', nn);
+    localStorage.setItem('userAvatar', currentUser.avatar || '');
+    // 清除自己的缓存，确保已读列表刷新时显示新名字
+    delete userInfoCache[currentUser.uid];
+    db.ref('users/' + currentUser.uid).set({
+      displayName: nn, avatar: currentUser.avatar || '',
+      lastSeen: firebase.database.ServerValue.TIMESTAMP
+    }).catch(err => console.error('保存设置失败:', err));
     settingsModal.classList.remove('show');
   }
 });
 
-// 搜索用户
-searchBtn.addEventListener('click', () => {
-  const searchTerm = userSearch.value.trim();
-  if (searchTerm && currentUser) {
-    // 基于用户名生成固定的用户ID，避免重复创建
-    const foundUserUid = 'user_' + btoa(searchTerm).replace(/[^a-zA-Z0-9]/g, '').substring(0, 20);
-    
-    // 模拟搜索用户（实际项目中应该从Firebase数据库中查询）
-    const foundUser = {
-      uid: foundUserUid,
-      displayName: searchTerm,
-      avatar: 'https://pub-141831e61e69445289222976a15b6fb3.r2.dev/Image_to_url_V2/-----2026-03-26-101455-imagetourl.cloud-1774491309403-grw8d7.png'
-    };
-    
-    // 检查是否已存在私聊（基于用户名查找）
-    const existingChat = chats.find(chat => 
-      chat.type === 'private' && 
-      chat.name === searchTerm &&
-      chat.members.includes(currentUser.uid)
-    );
-    
-    if (existingChat) {
-      selectChat(existingChat);
-    } else {
-      // 创建新的私聊
-      const newPrivateChat = {
-        type: 'private',
-        name: foundUser.displayName,
-        members: [currentUser.uid, foundUser.uid],
-        createdAt: firebase.database.ServerValue.TIMESTAMP
-      };
-      
-      db.ref('chats').push(newPrivateChat).then((snapshot) => {
-        const chat = newPrivateChat;
-        chat.id = snapshot.key;
-        chats.push(chat);
-        renderChatList();
-        selectChat(chat);
+// ========================================================================
+//  好友系统
+// ========================================================================
+friendSearchBtn.addEventListener('click', () => {
+  const name = friendSearchInput.value.trim();
+  if (!name || !currentUser) return;
+  const targetUid = uidFromName(name);
+  if (targetUid === currentUser.uid) { friendSearchResults.innerHTML = '<div class="search-result-item">不能添加自己为好友</div>'; return; }
+  if (friends.some(f => f.uid === targetUid)) { friendSearchResults.innerHTML = `<div class="search-result-item">${escapeHtml(name)} 已经是你的好友了</div>`; return; }
+
+  db.ref('users/' + targetUid).once('value').then(snap => {
+    const u = snap.val();
+    const dn = u ? u.displayName : name;
+    const av = u ? u.avatar : '';
+    return db.ref('friendRequests/' + targetUid + '/' + currentUser.uid).once('value').then(reqSnap => {
+      if (reqSnap.exists()) { friendSearchResults.innerHTML = `<div class="search-result-item">已向 ${escapeHtml(dn)} 发送过请求</div>`; return; }
+      friendSearchResults.innerHTML = '';
+      const item = document.createElement('div');
+      item.className = 'search-result-item';
+      item.innerHTML = `<img src="${getAvatarUrl({avatar:av})}" class="search-result-avatar" alt=""><span class="search-result-name">${escapeHtml(dn)}</span><button class="modal-btn create send-request-btn">添加</button>`;
+      item.querySelector('.send-request-btn').addEventListener('click', () => {
+        db.ref('friendRequests/' + targetUid + '/' + currentUser.uid).set({
+          fromUid: currentUser.uid, fromName: currentUser.displayName, fromAvatar: currentUser.avatar || '', timestamp: firebase.database.ServerValue.TIMESTAMP
+        }).then(() => { item.innerHTML = `<span class="search-result-name">${escapeHtml(dn)}</span><span style="color:#28a745;font-size:13px">✓ 请求已发送</span>`; })
+          .catch(err => console.error('发送好友请求失败:', err));
       });
-    }
-    
-    userSearch.value = '';
-  }
-});
-
-// 创建群聊
-createGroupSubmit.addEventListener('click', () => {
-  const groupName = groupNameInput.value.trim();
-  if (groupName) {
-    const newGroup = {
-      id: Date.now().toString(),
-      name: groupName,
-      type: 'group',
-      members: [currentUser.uid],
-      createdAt: firebase.database.ServerValue.TIMESTAMP
-    };
-    
-    db.ref('chats').push(newGroup).then(() => {
-      groupModal.classList.remove('show');
-      groupNameInput.value = '';
+      friendSearchResults.appendChild(item);
     });
-  }
+  }).catch(err => { console.error('搜索用户失败:', err); friendSearchResults.innerHTML = '<div class="search-result-item">搜索失败，请重试</div>'; });
 });
 
-// 发送消息
-sendBtn.addEventListener('click', sendMessage);
-chatInput.addEventListener('keypress', (e) => {
-  if (e.key === 'Enter') {
-    sendMessage();
-  }
-});
-
-function sendMessage() {
-  const messageText = chatInput.value.trim();
-  if (messageText && currentChat && currentUser) {
-    // 检查是否包含图片URL
-    const imageRegex = /(https?:\/\/.*\.(?:png|jpg|jpeg|gif|webp))/i;
-    const imageMatch = messageText.match(imageRegex);
-    
-    // 检查是否包含链接
-    const linkRegex = /(https?:\/\/(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&\/=]*))/i;
-    
-    const message = {
-      id: Date.now().toString(),
-      chatId: currentChat.id,
-      senderId: currentUser.uid,
-      senderName: currentUser.displayName,
-      text: messageText,
-      timestamp: firebase.database.ServerValue.TIMESTAMP,
-      readBy: {}
-    };
-    
-    message.readBy[currentUser.uid] = true;
-    
-    db.ref('messages').push(message).then(() => {
-      chatInput.value = '';
-    });
-  }
+function loadFriendRequests() {
+  if (!currentUser) return;
+  if (requestsListenerRef && requestsListenerCallback) requestsListenerRef.off('value', requestsListenerCallback);
+  requestsListenerRef = db.ref('friendRequests/' + currentUser.uid);
+  requestsListenerCallback = snap => { const c = snap.numChildren(); requestBadge.textContent = c; requestBadge.style.display = c > 0 ? 'inline' : 'none'; };
+  requestsListenerRef.on('value', requestsListenerCallback);
 }
 
-// 加载聊天列表
-function loadChats() {
-  db.ref('chats').on('value', (snapshot) => {
-    chats = [];
-    snapshot.forEach((childSnapshot) => {
-      const chat = childSnapshot.val();
-      chat.id = childSnapshot.key;
-      // 只添加当前用户有权限的聊天
-      // 群聊：所有用户都可以看到
-      // 私聊：只有成员可以看到
-      if ((chat.type === 'group') || 
-          (chat.type === 'private' && chat.members && chat.members.includes(currentUser.uid))) {
-        chats.push(chat);
-      }
+function renderFriendRequests() {
+  if (!currentUser) return;
+  friendRequestsList.innerHTML = '<div style="text-align:center;color:#999">加载中...</div>';
+  db.ref('friendRequests/' + currentUser.uid).once('value').then(snap => {
+    friendRequestsList.innerHTML = '';
+    if (!snap.exists() || snap.numChildren() === 0) { friendRequestsList.innerHTML = '<div style="text-align:center;color:#999;padding:20px">暂无好友请求</div>'; return; }
+    snap.forEach(child => {
+      const req = child.val(), fromUid = child.key;
+      const item = document.createElement('div');
+      item.className = 'request-item';
+      item.innerHTML = `<img src="${getAvatarUrl(req)}" class="search-result-avatar" alt=""><span class="search-result-name">${escapeHtml(req.fromName || '未知用户')}</span><button class="modal-btn create accept-btn">接受</button><button class="modal-btn cancel reject-btn">拒绝</button>`;
+      item.querySelector('.accept-btn').addEventListener('click', () => {
+        const mi = { uid: currentUser.uid, displayName: currentUser.displayName, avatar: currentUser.avatar || '' };
+        const oi = { uid: fromUid, displayName: req.fromName || '', avatar: req.fromAvatar || '' };
+        Promise.all([db.ref('friends/' + currentUser.uid + '/' + fromUid).set(oi), db.ref('friends/' + fromUid + '/' + currentUser.uid).set(mi), db.ref('friendRequests/' + currentUser.uid + '/' + fromUid).remove()])
+          .then(() => { item.innerHTML = `<span class="search-result-name">${escapeHtml(req.fromName || '好友')}</span><span style="color:#28a745">✓ 已添加</span>`; })
+          .catch(err => console.error('接受好友请求失败:', err));
+      });
+      item.querySelector('.reject-btn').addEventListener('click', () => { db.ref('friendRequests/' + currentUser.uid + '/' + fromUid).remove().then(() => item.remove()); });
+      friendRequestsList.appendChild(item);
     });
-    // 如果没有聊天，创建默认群聊
-    if (chats.length === 0) {
-      const defaultGroup = {
-        name: '世界群聊',
-        type: 'group',
-        members: [currentUser.uid],
-        createdAt: firebase.database.ServerValue.TIMESTAMP
-      };
-      db.ref('chats').push(defaultGroup);
-    }
-    renderChatList();
   });
 }
 
-// 渲染聊天列表
+function loadFriends() {
+  if (!currentUser) return;
+  if (friendsListenerRef && friendsListenerCallback) friendsListenerRef.off('value', friendsListenerCallback);
+  friendsListenerRef = db.ref('friends/' + currentUser.uid);
+  friendsListenerCallback = snap => { friends = []; snap.forEach(c => { const f = c.val(); f.uid = c.key; friends.push(f); }); renderFriendsList(); };
+  friendsListenerRef.on('value', friendsListenerCallback);
+}
+
+function renderFriendsList() {
+  friendsList.innerHTML = '';
+  if (friends.length === 0) { friendsList.innerHTML = '<div style="color:#999;font-size:13px;padding:5px">暂无好友，点击"添加好友"</div>'; return; }
+  friends.forEach(f => {
+    const pc = chats.find(c => c.type === 'private' && c.members && c.members.includes(f.uid));
+    const item = document.createElement('div');
+    item.className = `chat-item ${currentChat && pc && currentChat.id === pc.id ? 'active' : ''}`;
+    item.innerHTML = `<div class="friend-item-content"><img src="${getAvatarUrl(f)}" class="friend-avatar-small" alt=""><span>${escapeHtml(f.displayName || '好友')}</span></div>`;
+    item.addEventListener('click', () => { if (pc) selectChat(pc); else createPrivateChatWith(f); });
+    friendsList.appendChild(item);
+  });
+}
+
+function createPrivateChatWith(friend) {
+  db.ref('chats').push({ type: 'private', name: friend.displayName, members: [currentUser.uid, friend.uid], createdAt: firebase.database.ServerValue.TIMESTAMP })
+    .then(s => selectChat({ type: 'private', name: friend.displayName, members: [currentUser.uid, friend.uid], id: s.key }))
+    .catch(err => console.error('创建私聊失败:', err));
+}
+
+// ====== 创建群聊 ======
+function renderGroupFriendPicker() {
+  groupFriendList.innerHTML = '';
+  if (friends.length === 0) { groupFriendList.innerHTML = '<div style="color:#999;font-size:13px;padding:10px">暂无好友，请先添加好友</div>'; return; }
+  friends.forEach(f => {
+    const label = document.createElement('label');
+    label.className = 'group-friend-item';
+    label.innerHTML = `<input type="checkbox" value="${escapeHtml(f.uid)}" class="friend-checkbox"><img src="${getAvatarUrl(f)}" class="friend-avatar-small" alt=""><span>${escapeHtml(f.displayName || '好友')}</span>`;
+    groupFriendList.appendChild(label);
+  });
+}
+
+createGroupSubmit.addEventListener('click', () => {
+  const gn = groupNameInput.value.trim();
+  if (!gn) return;
+  const checked = groupFriendList.querySelectorAll('.friend-checkbox:checked');
+  const members = [currentUser.uid, ...Array.from(checked).map(cb => cb.value)];
+  db.ref('chats').push({ name: gn, type: 'group', members, createdBy: currentUser.uid, createdAt: firebase.database.ServerValue.TIMESTAMP })
+    .then(s => { groupModal.classList.remove('show'); groupNameInput.value = ''; selectChat({ name: gn, type: 'group', members, createdBy: currentUser.uid, id: s.key }); })
+    .catch(err => console.error('创建群聊失败:', err));
+});
+
+// ========================================================================
+//  群管理面板（统一管理：成员、邀请、删除）
+// ========================================================================
+
+// 切换群管理面板
+toggleMgmtBtn.addEventListener('click', () => {
+  if (!currentChat || currentChat.type !== 'group') return;
+  const show = groupMgmtPanel.style.display === 'none';
+  groupMgmtPanel.style.display = show ? 'block' : 'none';
+  if (show) renderGroupMgmtPanel();
+});
+
+function renderGroupMgmtPanel() {
+  if (!currentChat || currentChat.type !== 'group') return;
+  const members = currentChat.members || [];
+  const isOwner = currentChat.createdBy === currentUser.uid;
+
+  mgmtMemberCount.textContent = `(${members.length} 人)`;
+
+  // 渲染成员列表
+  mgmtMembersList.innerHTML = '<div style="color:#999;font-size:13px;padding:5px">加载中...</div>';
+  batchGetUserInfo(members).then(infos => {
+    mgmtMembersList.innerHTML = '';
+    infos.forEach(m => {
+      const isMe = m.uid === currentUser.uid;
+      const isCreator = m.uid === currentChat.createdBy;
+      const canRemove = isOwner && !isMe && !isCreator;
+      const item = document.createElement('div');
+      item.className = 'mgmt-member-item';
+      item.innerHTML = `
+        <img src="${getAvatarUrl(m)}" class="friend-avatar-small" alt="">
+        <span class="member-name">${escapeHtml(m.displayName || '未知用户')}${isMe ? ' (我)' : ''}${isCreator ? ' 👑' : ''}</span>
+        ${canRemove ? '<button class="mgmt-remove-btn">移除</button>' : ''}
+      `;
+      if (canRemove) {
+        item.querySelector('.mgmt-remove-btn').addEventListener('click', () => {
+          const newMembers = members.filter(uid => uid !== m.uid);
+          db.ref('chats/' + currentChat.id + '/members').set(newMembers)
+            .then(() => { currentChat.members = newMembers; renderGroupMgmtPanel(); updateGroupInfoBar(); })
+            .catch(err => console.error('移除失败:', err));
+        });
+      }
+      mgmtMembersList.appendChild(item);
+    });
+  });
+
+  // 渲染邀请列表（不在群内的好友）
+  const invitable = friends.filter(f => !members.includes(f.uid));
+  mgmtInviteList.innerHTML = '';
+  if (invitable.length === 0) {
+    mgmtInviteList.innerHTML = '<div style="color:#999;font-size:13px;padding:5px">所有好友都已在群聊中</div>';
+  } else {
+    invitable.forEach(f => {
+      const item = document.createElement('div');
+      item.className = 'mgmt-member-item';
+      item.innerHTML = `<img src="${getAvatarUrl(f)}" class="friend-avatar-small" alt=""><span class="member-name">${escapeHtml(f.displayName || '好友')}</span><button class="mgmt-invite-btn">邀请</button>`;
+      item.querySelector('.mgmt-invite-btn').addEventListener('click', () => {
+        const nm = [...members, f.uid];
+        db.ref('chats/' + currentChat.id + '/members').set(nm)
+          .then(() => { currentChat.members = nm; renderGroupMgmtPanel(); updateGroupInfoBar(); })
+          .catch(err => console.error('邀请失败:', err));
+      });
+      mgmtInviteList.appendChild(item);
+    });
+  }
+
+  // 删除按钮（仅群主可见）
+  mgmtDeleteSection.style.display = isOwner ? 'block' : 'none';
+}
+
+// 删除群聊
+deleteGroupBtn.addEventListener('click', () => {
+  if (!currentChat || currentChat.createdBy !== currentUser.uid) { alert('只有群主才能删除群聊'); return; }
+  deleteConfirmModal.classList.add('show');
+});
+
+confirmDelete.addEventListener('click', () => {
+  if (!currentChat) return;
+  const chatId = currentChat.id;
+  const updates = { ['chats/' + chatId]: null };
+  db.ref('messages').orderByChild('chatId').equalTo(chatId).once('value').then(snap => {
+    snap.forEach(c => { updates['messages/' + c.key] = null; });
+    return db.ref().update(updates);
+  }).then(() => {
+    deleteConfirmModal.classList.remove('show');
+    currentChat = null;
+    groupInfoBar.style.display = 'none';
+    groupMgmtPanel.style.display = 'none';
+    chatMessages.innerHTML = '<div style="text-align:center;color:#999;margin-top:50px">群聊已删除</div>';
+    chatInputArea.style.display = 'none';
+    renderChatList(); renderFriendsList();
+  }).catch(err => { console.error('删除失败:', err); alert('删除失败，请重试'); });
+});
+
+// 更新群信息栏
+function updateGroupInfoBar() {
+  if (!currentChat || currentChat.type !== 'group') { groupInfoBar.style.display = 'none'; groupMgmtPanel.style.display = 'none'; return; }
+  groupInfoBar.style.display = 'flex';
+  groupInfoName.textContent = currentChat.name;
+  groupInfoCount.textContent = `${(currentChat.members || []).length} 人`;
+}
+
+// ========================================================================
+//  已读未读详情（实时拉取最新昵称）
+// ========================================================================
+
+cancelReadStatus.addEventListener('click', () => readStatusModal.classList.remove('show'));
+
+function showReadStatusDetail(message) {
+  if (!currentChat || currentChat.type !== 'group' || !message) return;
+
+  const allMembers = (currentChat.members || []).slice();
+  // 发送者不参与已读/未读判定
+  const otherMembers = allMembers.filter(uid => uid !== message.senderId);
+  const readByUids = message.readBy ? Object.keys(message.readBy) : [];
+  // 已读 = readBy 中除了发送者之外的成员
+  const readUids = readByUids.filter(uid => uid !== message.senderId && otherMembers.includes(uid));
+  const unreadUids = otherMembers.filter(uid => !readByUids.includes(uid));
+
+  readCountDisplay.textContent = readUids.length;
+  unreadCountDisplay.textContent = unreadUids.length;
+  readMembersList.innerHTML = '<div style="color:#999;font-size:13px;padding:5px">加载中...</div>';
+  unreadMembersList.innerHTML = '<div style="color:#999;font-size:13px;padding:5px">加载中...</div>';
+
+  // 实时从 Firebase 拉取最新昵称
+  batchGetUserInfo(readUids).then(infos => {
+    readMembersList.innerHTML = '';
+    if (infos.length === 0) { readMembersList.innerHTML = '<div style="color:#999;font-size:13px;padding:5px">暂无</div>'; return; }
+    infos.forEach(m => {
+      const item = document.createElement('div');
+      item.className = 'read-member-item';
+      item.innerHTML = `<img src="${getAvatarUrl(m)}" class="friend-avatar-small" alt=""><span>${escapeHtml(m.displayName || '未知用户')}</span>`;
+      readMembersList.appendChild(item);
+    });
+  });
+
+  batchGetUserInfo(unreadUids).then(infos => {
+    unreadMembersList.innerHTML = '';
+    if (infos.length === 0) { unreadMembersList.innerHTML = '<div style="color:#999;font-size:13px;padding:5px">全部已读</div>'; return; }
+    infos.forEach(m => {
+      const item = document.createElement('div');
+      item.className = 'read-member-item';
+      item.innerHTML = `<img src="${getAvatarUrl(m)}" class="friend-avatar-small" alt=""><span>${escapeHtml(m.displayName || '未知用户')}</span>`;
+      unreadMembersList.appendChild(item);
+    });
+  });
+
+  readStatusModal.classList.add('show');
+}
+
+// ========================================================================
+//  聊天核心
+// ========================================================================
+sendBtn.addEventListener('click', sendMessage);
+chatInput.addEventListener('keypress', e => { if (e.key === 'Enter') sendMessage(); });
+
+function sendMessage() {
+  const text = chatInput.value.trim();
+  if (!text || !currentChat || !currentUser) return;
+  db.ref('messages').push({
+    chatId: currentChat.id, senderId: currentUser.uid,
+    senderName: currentUser.displayName, text,
+    timestamp: firebase.database.ServerValue.TIMESTAMP,
+    readBy: { [currentUser.uid]: true }
+  }).then(() => { chatInput.value = ''; }).catch(err => console.error('发送失败:', err));
+}
+
+function loadChats() {
+  if (chatsListenerRef && chatsListenerCallback) chatsListenerRef.off('value', chatsListenerCallback);
+  chatsListenerRef = db.ref('chats');
+  chatsListenerCallback = snap => {
+    const nc = [];
+    snap.forEach(c => { const ch = c.val(); ch.id = c.key; if (ch.type === 'group' || (ch.type === 'private' && ch.members && ch.members.includes(currentUser.uid))) nc.push(ch); });
+    chats = nc;
+    if (chats.length === 0 && snap.numChildren() === 0) {
+      db.ref('chats').push({ name: '世界群聊', type: 'group', members: [currentUser.uid], createdBy: currentUser.uid, createdAt: firebase.database.ServerValue.TIMESTAMP })
+        .catch(err => console.error('创建默认群聊失败:', err));
+    }
+    renderChatList(); renderFriendsList();
+    if (currentChat && currentChat.type === 'group') { const u = chats.find(c => c.id === currentChat.id); if (u) { currentChat = u; updateGroupInfoBar(); } }
+  };
+  chatsListenerRef.on('value', chatsListenerCallback);
+}
+
 function renderChatList() {
   groupChats.innerHTML = '';
-  privateChats.innerHTML = '';
-  
-  chats.forEach(chat => {
-    const chatItem = document.createElement('div');
-    chatItem.className = `chat-item ${currentChat && currentChat.id === chat.id ? 'active' : ''}`;
-    chatItem.innerHTML = `
-      <span>${chat.name}</span>
-      <span class="unread-count" id="unread-${chat.id}">0</span>
-    `;
-    chatItem.addEventListener('click', () => {
-      selectChat(chat);
-    });
-    
-    if (chat.type === 'group') {
-      groupChats.appendChild(chatItem);
-    } else {
-      privateChats.appendChild(chatItem);
-    }
-    
+  chats.filter(c => c.type === 'group').forEach(chat => {
+    const item = document.createElement('div');
+    item.className = `chat-item ${currentChat && currentChat.id === chat.id ? 'active' : ''}`;
+    item.innerHTML = `<span>${escapeHtml(chat.name)}</span><span class="unread-count" id="unread-${chat.id}" style="display:none">0</span>`;
+    item.addEventListener('click', () => selectChat(chat));
+    groupChats.appendChild(item);
     updateUnreadCount(chat.id);
   });
 }
 
-// 选择聊天
 function selectChat(chat) {
   currentChat = chat;
-  renderChatList();
-  loadMessages();
-  markChatAsRead();
+  renderChatList(); renderFriendsList();
+  loadMessages(); markChatAsRead(); updateGroupInfoBar();
+  groupMgmtPanel.style.display = 'none'; // 切换聊天时收起管理面板
 }
 
-// 加载消息
 function loadMessages() {
-  if (!currentChat) return;
-  
+  if (!currentChat || !currentUser) return;
+  if (activeMessagesRef && activeMessagesCallback) { activeMessagesRef.off('value', activeMessagesCallback); activeMessagesRef = null; activeMessagesCallback = null; }
   chatMessages.innerHTML = '';
-  db.ref('messages').orderByChild('chatId').equalTo(currentChat.id).on('value', (snapshot) => {
+  chatInputArea.style.display = 'flex';
+
+  const queryRef = db.ref('messages').orderByChild('chatId').equalTo(currentChat.id);
+  activeMessagesCallback = snap => {
+    if (!currentChat) return;
     chatMessages.innerHTML = '';
-    snapshot.forEach((childSnapshot) => {
-      const message = childSnapshot.val();
-      // 检查当前用户是否有权限查看此消息
-      // 群聊：所有用户都可以看到
-      // 私聊：只有消息发送者和接收者可以看到
-      if (currentChat.type === 'group' || 
-          (currentChat.type === 'private' && 
-           (message.senderId === currentUser.uid || 
-            (currentChat.members && currentChat.members.includes(currentUser.uid)))) {
-
-
-        renderMessage(message);
-      }
-    });
+    snap.forEach(c => { const m = c.val(); if (m) renderMessage(m); });
     chatMessages.scrollTop = chatMessages.scrollHeight;
-  });
+  };
+  activeMessagesRef = queryRef;
+  queryRef.on('value', activeMessagesCallback);
 }
 
-// 渲染消息
 function renderMessage(message) {
+  if (!message || !currentUser) return;
   const isSent = message.senderId === currentUser.uid;
-  const messageElement = document.createElement('div');
-  messageElement.className = `message ${isSent ? 'sent' : 'received'}`;
-  
-  // 处理消息内容，支持图片和链接
-  let messageContent = message.text;
-  
-  // 处理图片URL
-  const imageRegex = /(https?:\/\/.*\.(?:png|jpg|jpeg|gif|webp))/i;
-  messageContent = messageContent.replace(imageRegex, '<img src="$1" alt="图片">');
-  
-  // 处理普通链接
-  const linkRegex = /(https?:\/\/(?:www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b(?:[-a-zA-Z0-9()@:%_\+.~#?&\/=]*))/i;
-  messageContent = messageContent.replace(linkRegex, '<a href="$1" target="_blank">$1</a>');
-  
-  // 群聊显示已读未读人数，私聊显示已读/未读状态
-  let readStatus = '';
-  if (isSent) {
-    if (currentChat && currentChat.type === 'group') {
-      // 群聊：显示已读未读人数
-      const readCount = message.readBy ? Object.keys(message.readBy).length : 0;
-      const totalMembers = currentChat.members ? currentChat.members.length : 1;
-      const unreadCount = totalMembers - readCount;
-      readStatus = `<div class="message-read-status">${readCount}已读 ${unreadCount}未读</div>`;
+  const el = document.createElement('div');
+  el.className = `message ${isSent ? 'sent' : 'received'}`;
+
+  let content = escapeHtml(message.text || '');
+  content = content.replace(/(https?:\/\/[^\s"']*\.(?:png|jpg|jpeg|gif|webp))/gi, '<img src="$1" alt="图片">');
+  content = content.replace(/(https?:\/\/[^\s"']+)/gi, m => m.includes('<img') ? m : `<a href="${m}" target="_blank" rel="noopener noreferrer">${m}</a>`);
+
+  let readStatusHtml = '';
+  if (currentChat && currentChat.type === 'group') {
+    // ★ 修复：发送者不计入已读数
+    const allMembers = currentChat.members || [];
+    const otherMembers = allMembers.filter(uid => uid !== message.senderId);
+    const readByUids = message.readBy ? Object.keys(message.readBy) : [];
+    const readCount = readByUids.filter(uid => uid !== message.senderId && otherMembers.includes(uid)).length;
+    const unreadCount = otherMembers.length - readCount;
+
+    if (isSent) {
+      // 自己的消息：可点击查看详情
+      readStatusHtml = `<div class="message-read-status clickable-read" data-msg='${escapeHtml(JSON.stringify({senderId:message.senderId, readBy:message.readBy||{}}))}'>${readCount}已读 ${unreadCount}未读</div>`;
     } else {
-      // 私聊：显示已读/未读
-      const isReadByOther = message.readBy && Object.keys(message.readBy).some(uid => uid !== currentUser.uid);
-      readStatus = `<div class="message-status">${isReadByOther ? '已读' : '未读'}</div>`;
+      // 别人的消息：只显示已读标记
+      const iRead = readByUids.includes(currentUser.uid);
+      readStatusHtml = `<div class="message-status">${iRead ? '已读' : '未读'}</div>`;
     }
+  } else if (currentChat && currentChat.type === 'private' && isSent) {
+    const readByOthers = message.readBy && Object.keys(message.readBy).some(u => u !== currentUser.uid);
+    readStatusHtml = `<div class="message-status">${readByOthers ? '已读' : '未读'}</div>`;
   }
-  
-  // 获取头像（自己的消息显示自己的头像，别人的消息显示发送者的头像）
-  const avatarUrl = isSent ? (currentUser.avatar || 'https://pub-141831e61e69445289222976a15b6fb3.r2.dev/Image_to_url_V2/-----2026-03-26-101455-imagetourl.cloud-1774491309403-grw8d7.png') : 'https://pub-141831e61e69445289222976a15b6fb3.r2.dev/Image_to_url_V2/-----2026-03-26-101455-imagetourl.cloud-1774491309403-grw8d7.png';
-  
-  messageElement.innerHTML = `
-    <div class="message-avatar">
-      <img src="${avatarUrl}" alt="头像">
-    </div>
+
+  el.innerHTML = `
+    <div class="message-avatar"><img src="${isSent ? getAvatarUrl(currentUser) : getAvatarUrl(message)}" alt="头像"></div>
     <div class="message-body">
-      <div class="message-sender">${message.senderName}</div>
-      <div class="message-content-wrapper">
-        ${isSent ? readStatus : ''}
-        <div class="message-content">${messageContent}</div>
-      </div>
+      <div class="message-sender">${escapeHtml(message.senderName || '未知用户')}</div>
+      <div class="message-content-wrapper">${readStatusHtml}<div class="message-content">${content}</div></div>
     </div>
   `;
-  
-  chatMessages.appendChild(messageElement);
+
+  // 绑定已读详情点击事件
+  const readEl = el.querySelector('.clickable-read');
+  if (readEl) {
+    readEl.addEventListener('click', () => showReadStatusDetail(message));
+  }
+
+  chatMessages.appendChild(el);
 }
 
-// 更新未读消息计数
 function updateUnreadCount(chatId) {
   if (!currentUser) return;
-  
-  db.ref('messages').orderByChild('chatId').equalTo(chatId).on('value', (snapshot) => {
-    let unreadCount = 0;
-    snapshot.forEach((childSnapshot) => {
-      const message = childSnapshot.val();
-      if (message.senderId !== currentUser.uid && (!message.readBy || !message.readBy[currentUser.uid])) {
-        unreadCount++;
-      }
-    });
-    const unreadElement = document.getElementById(`unread-${chatId}`);
-    if (unreadElement) {
-      unreadElement.textContent = unreadCount;
-      unreadElement.style.display = unreadCount > 0 ? 'flex' : 'none';
-    }
-  });
+  if (unreadListeners[chatId]) unreadListeners[chatId].ref.off('value', unreadListeners[chatId].callback);
+  const ref = db.ref('messages').orderByChild('chatId').equalTo(chatId);
+  const cb = snap => {
+    let count = 0;
+    snap.forEach(c => { const m = c.val(); if (m.senderId !== currentUser.uid && (!m.readBy || !m.readBy[currentUser.uid])) count++; });
+    const el = document.getElementById(`unread-${chatId}`);
+    if (el) { el.textContent = count; el.style.display = count > 0 ? 'flex' : 'none'; }
+  };
+  unreadListeners[chatId] = { ref, callback: cb };
+  ref.on('value', cb);
 }
 
-// 标记聊天为已读
 function markChatAsRead() {
   if (!currentChat || !currentUser) return;
-  
-  db.ref('messages').orderByChild('chatId').equalTo(currentChat.id).once('value', (snapshot) => {
-    snapshot.forEach((childSnapshot) => {
-      const message = childSnapshot.val();
-      if (message.senderId !== currentUser.uid) {
-        const updates = {};
-        if (!message.readBy) {
-          updates['readBy'] = {};
-        }
-        updates[`readBy/${currentUser.uid}`] = true;
-        childSnapshot.ref.update(updates);
-      }
-    });
-  });
+  db.ref('messages').orderByChild('chatId').equalTo(currentChat.id).once('value', snap => {
+    snap.forEach(c => { const m = c.val(); if (m.senderId !== currentUser.uid) { const u = {}; if (!m.readBy) u['readBy'] = {}; u[`readBy/${currentUser.uid}`] = true; c.ref.update(u).catch(err => console.error('标记已读失败:', err)); } });
+  }).catch(err => console.error('获取消息失败:', err));
 }
 
-// 模拟用户登录（实际项目中应该使用Firebase Auth）
+// ========================================================================
+//  登录 & 初始化
+// ========================================================================
 function simulateLogin() {
-  // 从本地存储读取用户信息
-  let savedUid = localStorage.getItem('userUid');
-  const savedNickname = localStorage.getItem('userNickname');
-  const savedAvatar = localStorage.getItem('userAvatar');
-  
-  // 如果没有保存的UID，生成一个新的并保存
-  if (!savedUid) {
-    savedUid = 'user_' + Date.now();
-    localStorage.setItem('userUid', savedUid);
-  }
-  
-  // 模拟用户信息
-  currentUser = {
-    uid: savedUid,
-    displayName: savedNickname || '用户' + Math.floor(Math.random() * 1000),
-    avatar: savedAvatar || 'https://pub-141831e61e69445289222976a15b6fb3.r2.dev/Image_to_url_V2/-----2026-03-26-101455-imagetourl.cloud-1774491309403-grw8d7.png'
-  };
-  
-  // 初始化默认群聊
-  const defaultGroup = {
-    id: 'default',
-    name: '世界群聊',
-    type: 'group',
-    members: [currentUser.uid],
-    createdAt: firebase.database.ServerValue.TIMESTAMP
-  };
-  
-  db.ref('chats').once('value', (snapshot) => {
-    if (!snapshot.exists()) {
-      db.ref('chats').push(defaultGroup);
-    }
-  });
-  
-  loadChats();
+  let uid = localStorage.getItem('userUid');
+  const nn = localStorage.getItem('userNickname'), av = localStorage.getItem('userAvatar');
+  if (!uid) { uid = 'user_' + Date.now(); localStorage.setItem('userUid', uid); }
+
+  currentUser = { uid, displayName: nn || '用户' + Math.floor(Math.random() * 1000), avatar: av || 'https://pub-141831e61e69445289222976a15b6fb3.r2.dev/Image_to_url_V2/-----2026-03-26-101455-imagetourl.cloud-1774491309403-grw8d7.png' };
+
+  db.ref('users/' + uid).set({ displayName: currentUser.displayName, avatar: currentUser.avatar, lastSeen: firebase.database.ServerValue.TIMESTAMP })
+    .catch(err => console.error('注册失败:', err));
+
+  loadChats(); loadFriends(); loadFriendRequests();
 }
 
-// 初始化应用
-function initApp() {
-  initEmojiPicker();
-  simulateLogin();
-}
-
-// 页面加载完成后初始化
+function initApp() { initEmojiPicker(); simulateLogin(); }
 window.onload = initApp;
