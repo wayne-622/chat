@@ -297,9 +297,22 @@ function renderFriendsList() {
   friends.forEach(f => {
     const pc = chats.find(c => c.type === 'private' && c.members && c.members.includes(f.uid));
     const item = document.createElement('div');
-    item.className = `chat-item ${currentChat && pc && currentChat.id === pc.id ? 'active' : ''}`;
-    item.innerHTML = `<div class="friend-item-content"><img src="${getAvatarUrl(f)}" class="friend-avatar-small" alt=""><span>${escapeHtml(f.displayName || '好友')}</span></div>`;
-    item.addEventListener('click', () => { if (pc) selectChat(pc); else createPrivateChatWith(f); });
+    item.className = `chat-item friend-list-item ${currentChat && pc && currentChat.id === pc.id ? 'active' : ''}`;
+    item.innerHTML = `
+      <div class="friend-item-content" style="flex:1;cursor:pointer">
+        <img src="${getAvatarUrl(f)}" class="friend-avatar-small" alt="">
+        <span>${escapeHtml(f.displayName || '好友')}</span>
+      </div>
+      <button class="delete-friend-btn" title="删除好友">✕</button>
+    `;
+    // 点击头像/名字进入私聊
+    item.querySelector('.friend-item-content').addEventListener('click', () => { if (pc) selectChat(pc); else createPrivateChatWith(f); });
+    // 点击删除按钮
+    item.querySelector('.delete-friend-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!confirm(`确定要删除好友「${f.displayName}」吗？\n相关的私聊记录也会被清除。`)) return;
+      deleteFriend(f, pc);
+    });
     friendsList.appendChild(item);
   });
 }
@@ -308,6 +321,33 @@ function createPrivateChatWith(friend) {
   db.ref('chats').push({ type: 'private', name: friend.displayName, members: [currentUser.uid, friend.uid], createdAt: firebase.database.ServerValue.TIMESTAMP })
     .then(s => selectChat({ type: 'private', name: friend.displayName, members: [currentUser.uid, friend.uid], id: s.key }))
     .catch(err => console.error('创建私聊失败:', err));
+}
+
+function deleteFriend(friend, privateChat) {
+  const updates = {};
+  // 双向删除好友关系
+  updates['friends/' + currentUser.uid + '/' + friend.uid] = null;
+  updates['friends/' + friend.uid + '/' + currentUser.uid] = null;
+  // 删除私聊及消息
+  if (privateChat) {
+    updates['chats/' + privateChat.id] = null;
+    if (currentChat && currentChat.id === privateChat.id) {
+      currentChat = null;
+      groupInfoBar.style.display = 'none';
+      groupMgmtPanel.style.display = 'none';
+      chatMessages.innerHTML = '<div style="text-align:center;color:#999;margin-top:50px">选择一个聊天开始对话</div>';
+      chatInputArea.style.display = 'none';
+    }
+    // 删除该私聊的所有消息
+    db.ref('messages').orderByChild('chatId').equalTo(privateChat.id).once('value').then(snap => {
+      const msgUpdates = {};
+      snap.forEach(c => { msgUpdates['messages/' + c.key] = null; });
+      if (Object.keys(msgUpdates).length > 0) db.ref().update(msgUpdates);
+    });
+  }
+  db.ref().update(updates)
+    .then(() => { console.log('[删除好友] 成功:', friend.displayName); })
+    .catch(err => { console.error('[删除好友] 失败:', err); alert('删除失败，请重试'); });
 }
 
 // ====== 创建群聊 ======
