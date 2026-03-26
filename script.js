@@ -223,10 +223,21 @@ friendSearchBtn.addEventListener('click', () => {
       item.className = 'search-result-item';
       item.innerHTML = `<img src="${getAvatarUrl(u)}" class="search-result-avatar" alt=""><span class="search-result-name">${escapeHtml(u.displayName)}</span><button class="modal-btn create send-request-btn">添加</button>`;
       item.querySelector('.send-request-btn').addEventListener('click', () => {
+        const btn = item.querySelector('.send-request-btn');
+        btn.disabled = true;
+        btn.textContent = '发送中...';
+        console.log('[好友请求] 发送到:', 'friendRequests/' + uid + '/' + currentUser.uid);
         db.ref('friendRequests/' + uid + '/' + currentUser.uid).set({
           fromUid: currentUser.uid, fromName: currentUser.displayName, fromAvatar: currentUser.avatar || '', timestamp: firebase.database.ServerValue.TIMESTAMP
-        }).then(() => { item.querySelector('.send-request-btn').outerHTML = '<span style="color:#28a745;font-size:13px">✓ 已发送</span>'; })
-          .catch(err => console.error('发送好友请求失败:', err));
+        }).then(() => {
+          console.log('[好友请求] 发送成功');
+          btn.outerHTML = '<span style="color:#28a745;font-size:13px">✓ 已发送</span>';
+        }).catch(err => {
+          console.error('[好友请求] 发送失败:', err);
+          btn.disabled = false;
+          btn.textContent = '添加';
+          alert('发送失败: ' + err.message);
+        });
       });
       friendSearchResults.appendChild(item);
     });
@@ -238,7 +249,13 @@ function loadFriendRequests() {
   if (!currentUser) return;
   if (requestsListenerRef && requestsListenerCallback) requestsListenerRef.off('value', requestsListenerCallback);
   requestsListenerRef = db.ref('friendRequests/' + currentUser.uid);
-  requestsListenerCallback = snap => { const c = snap.numChildren(); requestBadge.textContent = c; requestBadge.style.display = c > 0 ? 'inline' : 'none'; };
+  console.log('[好友请求] 监听路径:', 'friendRequests/' + currentUser.uid);
+  requestsListenerCallback = snap => {
+    const c = snap.numChildren();
+    console.log('[好友请求] 收到更新, 数量:', c, '数据:', snap.val());
+    requestBadge.textContent = c;
+    requestBadge.style.display = c > 0 ? 'inline' : 'none';
+  };
   requestsListenerRef.on('value', requestsListenerCallback);
 }
 
