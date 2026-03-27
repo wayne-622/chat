@@ -101,6 +101,15 @@ const forwardMsgPreview = $('forward-msg-preview');
 const forwardGroupList = $('forward-group-list');
 const cancelForward = $('cancel-forward');
 const confirmForward = $('confirm-forward');
+const aliasModal = $('alias-modal');
+const aliasInput = $('alias-input');
+const aliasAvatar = $('alias-avatar');
+const aliasName = $('alias-name');
+const saveAlias = $('save-alias');
+const cancelAlias = $('cancel-alias');
+
+// 当前正在编辑备注的好友
+let currentAliasFriend = null;
 
 // ====== 工具函数 ======
 function escapeHtml(text) {
@@ -132,7 +141,10 @@ function getUserInfo(uid) {
   });
 }
 
-// 强制刷新用户缓存（好友名变更场景）
+// 获取好友显示名：备注优先，其次最新昵称
+function getFriendDisplayName(friend) {
+  return friend.alias || friend.displayName || '好友';
+}
 function refreshUserInfo(uid) {
   delete userInfoCache[uid];
   return getUserInfo(uid);
@@ -182,6 +194,22 @@ cancelSettings.addEventListener('click', () => settingsModal.classList.remove('s
 cancelReadStatus.addEventListener('click', () => readStatusModal.classList.remove('show'));
 cancelDelete.addEventListener('click', () => deleteConfirmModal.classList.remove('show'));
 cancelForward.addEventListener('click', () => forwardModal.classList.remove('show'));
+cancelAlias.addEventListener('click', () => aliasModal.classList.remove('show'));
+
+aliasInput.addEventListener('keypress', e => { if (e.key === 'Enter') saveAlias.click(); });
+saveAlias.addEventListener('click', () => {
+  if (!currentAliasFriend || !currentUser) return;
+  const alias = aliasInput.value.trim();
+  const updates = {};
+  if (alias) {
+    updates['friends/' + currentUser.uid + '/' + currentAliasFriend.uid + '/alias'] = alias;
+  } else {
+    updates['friends/' + currentUser.uid + '/' + currentAliasFriend.uid + '/alias'] = null;
+  }
+  db.ref().update(updates).then(() => {
+    aliasModal.classList.remove('show');
+  }).catch(err => alert('保存备注失败'));
+});
 quotePreviewClose.addEventListener('click', () => { quotingMessage = null; quotePreviewBar.style.display = 'none'; });
 
 document.querySelectorAll('.modal').forEach(modal => {
@@ -369,20 +397,40 @@ function renderFriendsList() {
   if (friends.length === 0) { friendsList.innerHTML = '<div style="color:#999;font-size:13px;padding:5px">暂无好友，点击"添加好友"</div>'; return; }
   friends.forEach(f => {
     const pc = chats.find(c => c.type === 'private' && c.members && c.members.includes(f.uid));
+    const showName = f.alias ? `${f.alias}（${f.displayName}）` : f.alias || f.displayName || '好友';
     const item = document.createElement('div');
     item.className = `chat-item friend-list-item ${currentChat && pc && currentChat.id === pc.id ? 'active' : ''}`;
     item.innerHTML = `
       <div class="friend-item-content" style="flex:1;cursor:pointer">
         <img src="${getAvatarUrl(f)}" class="friend-avatar-small" alt="">
-        <span>${escapeHtml(f.displayName || '好友')}</span>
+        <span>${escapeHtml(showName)}</span>
       </div>
-      <button class="delete-friend-btn" title="删除好友">✕</button>
+      <div class="friend-actions-wrap">
+        <button class="friend-actions-btn" title="更多">⋯</button>
+        <div class="friend-actions-dropdown">
+          <div class="friend-action-item" data-action="alias">📝 设置备注</div>
+          <div class="friend-action-item" data-action="delete">🗑️ 删除好友</div>
+        </div>
+      </div>
     `;
     item.querySelector('.friend-item-content').addEventListener('click', () => { if (pc) selectChat(pc); else createPrivateChatWith(f); });
-    item.querySelector('.delete-friend-btn').addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (!confirm(`确定要删除好友「${f.displayName}」吗？\n相关的私聊记录也会被清除。`)) return;
-      deleteFriend(f, pc);
+    // 操作菜单
+    item.querySelectorAll('.friend-action-item').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const action = btn.dataset.action;
+        if (action === 'alias') {
+          currentAliasFriend = f;
+          aliasAvatar.src = getAvatarUrl(f);
+          aliasName.textContent = f.displayName || '好友';
+          aliasInput.value = f.alias || '';
+          aliasModal.classList.add('show');
+          aliasInput.focus();
+        } else if (action === 'delete') {
+          if (!confirm(`确定要删除好友「${f.displayName}」吗？\n相关的私聊记录也会被清除。`)) return;
+          deleteFriend(f, pc);
+        }
+      });
     });
     friendsList.appendChild(item);
   });
@@ -641,7 +689,9 @@ $('ctx-forward').addEventListener('click', () => {
 $('ctx-mention').addEventListener('click', () => {
   if (!contextMessage) return;
   contextMenu.classList.remove('show');
-  const mentionName = contextMessage.senderName || '未知用户';
+  // 优先用备注名
+  const friend = friends.find(f => f.uid === contextMessage.senderId);
+  const mentionName = (friend && friend.alias) || contextMessage.senderName || '未知用户';
   chatInput.value += `@${mentionName} `;
   chatInput.focus();
 });
@@ -805,16 +855,24 @@ function renderMessage(message, msgKey) {
   // 如果是自己发的消息，直接用当前昵称
   if (isSent) {
     senderDisplayName = currentUser.displayName;
-  } else if (userInfoCache[message.senderId]) {
-    senderDisplayName = userInfoCache[message.senderId].displayName;
   } else {
-    // 异步刷新缓存并更新DOM
-    refreshUserInfo(message.senderId).then(info => {
-      const nameEl = el.querySelector('.message-sender');
-      if (nameEl) nameEl.textContent = info.displayName;
-      const avatarEl = el.querySelector('.message-avatar img');
-      if (avatarEl) avatarEl.src = getAvatarUrl(info);
-    });
+    // 查找好友备注
+    const friend = friends.find(f => f.uid === message.senderId);
+    if (friend && friend.alias) {
+      senderDisplayName = friend.alias;
+    } else if (userInfoCache[message.senderId]) {
+      senderDisplayName = userInfoCache[message.senderId].displayName;
+    } else {
+      // 异步刷新缓存并更新DOM
+      refreshUserInfo(message.senderId).then(info => {
+        const fr = friends.find(f => f.uid === message.senderId);
+        const name = (fr && fr.alias) || info.displayName;
+        const nameEl = el.querySelector('.message-sender');
+        if (nameEl) nameEl.textContent = name;
+        const avatarEl = el.querySelector('.message-avatar img');
+        if (avatarEl) avatarEl.src = getAvatarUrl(info);
+      });
+    }
   }
 
   let content = escapeHtml(message.text || '');

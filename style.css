@@ -671,11 +671,15 @@ body {
   align-items: center;
 }
 
-.delete-friend-btn {
+.friend-actions-wrap {
+  position: relative;
+}
+
+.friend-actions-btn {
   background: none;
   border: none;
   color: #ccc;
-  font-size: 14px;
+  font-size: 16px;
   cursor: pointer;
   padding: 4px 8px;
   border-radius: 4px;
@@ -683,8 +687,36 @@ body {
   transition: opacity 0.2s, color 0.2s;
 }
 
-.friend-list-item:hover .delete-friend-btn { opacity: 1; }
-.delete-friend-btn:hover { color: #dc3545; background: rgba(220, 53, 69, 0.1); }
+.friend-list-item:hover .friend-actions-btn { opacity: 1; }
+.friend-actions-btn:hover { color: #007bff; background: rgba(0, 123, 255, 0.1); }
+
+.friend-actions-dropdown {
+  display: none;
+  position: absolute;
+  right: 0;
+  top: 100%;
+  background: white;
+  border: 1px solid #dee2e6;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  z-index: 50;
+  min-width: 120px;
+  padding: 4px 0;
+  margin-top: 2px;
+}
+
+.friend-actions-wrap:hover .friend-actions-dropdown { display: block; }
+
+.friend-action-item {
+  padding: 8px 14px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #333;
+  white-space: nowrap;
+  transition: background 0.1s;
+}
+
+.friend-action-item:hover { background-color: #e8f0fe; color: #007bff; }
 
 /* ====== 转发预览 ====== */
 .forward-quote-preview {
