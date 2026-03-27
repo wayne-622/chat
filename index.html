@@ -59,6 +59,19 @@
           </div>
         </div>
         <div class="chat-messages" id="chat-messages"></div>
+        <!-- 右键菜单 -->
+        <div class="context-menu" id="context-menu">
+          <div class="context-menu-item" id="ctx-recall">撤回</div>
+          <div class="context-menu-item" id="ctx-quote">引用</div>
+          <div class="context-menu-item" id="ctx-delete">删除</div>
+          <div class="context-menu-item" id="ctx-forward">转发到群聊</div>
+          <div class="context-menu-item" id="ctx-mention">@ 他/她</div>
+        </div>
+        <!-- 引用预览栏 -->
+        <div class="quote-preview-bar" id="quote-preview-bar" style="display:none">
+          <div class="quote-preview-content" id="quote-preview-content"></div>
+          <button class="quote-preview-close" id="quote-preview-close">✕</button>
+        </div>
         <div class="chat-input-area" id="chat-input-area">
           <input type="text" class="chat-input" id="chat-input" placeholder="输入消息...">
           <button class="emoji-btn" id="emoji-btn">😊</button>
@@ -70,6 +83,22 @@
 
   <!-- 表情选择器 -->
   <div class="emoji-picker" id="emoji-picker"></div>
+
+  <!-- 右键菜单（放在 chat-main 内部用 absolute 定位）-->
+
+  <!-- 转发群聊选择模态框 -->
+  <div class="modal" id="forward-modal">
+    <div class="modal-content" style="max-width:400px">
+      <h2>转发消息</h2>
+      <div class="forward-quote-preview" id="forward-msg-preview"></div>
+      <h3 style="font-size:14px;color:#6c757d;margin-bottom:10px">选择要转发到的群聊</h3>
+      <div id="forward-group-list" class="group-friend-list"></div>
+      <div class="modal-buttons" style="margin-top:15px">
+        <button class="modal-btn cancel" id="cancel-forward">取消</button>
+        <button class="modal-btn create" id="confirm-forward">转发</button>
+      </div>
+    </div>
+  </div>
 
   <!-- 添加好友模态框 -->
   <div class="modal" id="add-friend-modal">

@@ -29,8 +29,15 @@ let friendsListenerCallback = null;
 let requestsListenerRef = null;
 let requestsListenerCallback = null;
 
-// 用户信息缓存（uid → {displayName, avatar}），用于已读列表实时显示最新昵称
+// 用户信息缓存（uid → {displayName, avatar}），用于实时显示最新昵称
 const userInfoCache = {};
+
+// 引用消息状态
+let quotingMessage = null;
+
+// 右键菜单上下文
+let contextMessage = null;
+let contextMessageId = null;
 
 // ====== DOM ======
 const $ = id => document.getElementById(id);
@@ -85,6 +92,15 @@ const cancelReadStatus = $('cancel-read-status');
 const deleteConfirmModal = $('delete-confirm-modal');
 const cancelDelete = $('cancel-delete');
 const confirmDelete = $('confirm-delete');
+const contextMenu = $('context-menu');
+const quotePreviewBar = $('quote-preview-bar');
+const quotePreviewContent = $('quote-preview-content');
+const quotePreviewClose = $('quote-preview-close');
+const forwardModal = $('forward-modal');
+const forwardMsgPreview = $('forward-msg-preview');
+const forwardGroupList = $('forward-group-list');
+const cancelForward = $('cancel-forward');
+const confirmForward = $('confirm-forward');
 
 // ====== 工具函数 ======
 function escapeHtml(text) {
@@ -103,11 +119,9 @@ function uidFromName(name) {
 
 // 获取用户信息（带缓存，优先返回 Firebase 最新数据）
 function getUserInfo(uid) {
-  // 如果是当前用户，直接返回
   if (currentUser && uid === currentUser.uid) {
     return Promise.resolve({ uid, displayName: currentUser.displayName, avatar: currentUser.avatar });
   }
-  // 缓存命中直接返回
   if (userInfoCache[uid]) {
     return Promise.resolve({ uid, ...userInfoCache[uid] });
   }
@@ -118,12 +132,20 @@ function getUserInfo(uid) {
   });
 }
 
+// 强制刷新用户缓存（好友名变更场景）
+function refreshUserInfo(uid) {
+  delete userInfoCache[uid];
+  return getUserInfo(uid);
+}
+
 // 批量获取用户信息
 function batchGetUserInfo(uids) {
   return Promise.all(uids.map(uid => getUserInfo(uid)));
 }
 
-// ====== 表情选择器 ======
+// ========================================================================
+//  表情选择器
+// ========================================================================
 const emojis = ['😀','😃','😄','😁','😆','😅','😂','🤣','😊','😇','🙂','🙃','😉','😌','😍','🥰','😘','😗','😙','😚','😋','😛','😝','😜','🤪','🤨','🧐','🤓','😎','🤩','🥳','😏','😒','😞','😔','😟','😕','🙁','☹️','😣','😖','😫','😩','🥺','😢','😭','😤','😠','😡','🤬','🤯','😳','🥵','🥶','😱','😨','😰','😥','😓','🤗','🤔','🤭','🤫','🤥','😶','😐','😑','😬','🙄','😯','😦','😧','😮','😲','🥱','😴','🤤','😪','😵','🤐','🥴','🤢','🤮','🤧','😷','🤒','🤕','🤑','🤠','😈','👿','👹','👺','🤡','💩','👻','💀','☠️','👽','👾','🤖','🎃','😺','😸','😹','😻','😼','😽','🙀','😿','😾'];
 
 function initEmojiPicker() {
@@ -142,9 +164,13 @@ function initEmojiPicker() {
 emojiBtn.addEventListener('click', e => { e.stopPropagation(); emojiPicker.classList.toggle('show'); });
 document.addEventListener('click', e => {
   if (!emojiBtn.contains(e.target) && !emojiPicker.contains(e.target)) emojiPicker.classList.remove('show');
+  // 关闭右键菜单
+  contextMenu.classList.remove('show');
 });
 
-// ====== 模态框开关 ======
+// ========================================================================
+//  模态框开关
+// ========================================================================
 addFriendBtn.addEventListener('click', () => { friendSearchInput.value = ''; friendSearchResults.innerHTML = ''; addFriendModal.classList.add('show'); });
 cancelAddFriend.addEventListener('click', () => addFriendModal.classList.remove('show'));
 friendRequestsBtn.addEventListener('click', () => { renderFriendRequests(); friendRequestsModal.classList.add('show'); });
@@ -155,12 +181,16 @@ settingsBtn.addEventListener('click', () => { if (currentUser) { nicknameInput.v
 cancelSettings.addEventListener('click', () => settingsModal.classList.remove('show'));
 cancelReadStatus.addEventListener('click', () => readStatusModal.classList.remove('show'));
 cancelDelete.addEventListener('click', () => deleteConfirmModal.classList.remove('show'));
+cancelForward.addEventListener('click', () => forwardModal.classList.remove('show'));
+quotePreviewClose.addEventListener('click', () => { quotingMessage = null; quotePreviewBar.style.display = 'none'; });
 
 document.querySelectorAll('.modal').forEach(modal => {
   modal.addEventListener('click', e => { if (e.target === modal) modal.classList.remove('show'); });
 });
 
-// ====== 头像上传 ======
+// ========================================================================
+//  头像上传
+// ========================================================================
 avatarUpload.addEventListener('change', e => {
   if (e.target.files && e.target.files[0]) {
     const reader = new FileReader();
@@ -172,18 +202,47 @@ avatarUpload.addEventListener('change', e => {
   }
 });
 
-// ====== 保存设置 ======
+// ========================================================================
+//  保存设置（改名）— 同步更新所有旧消息中的 senderName
+// ========================================================================
 saveSettings.addEventListener('click', () => {
   const nn = nicknameInput.value.trim();
   if (nn && currentUser) {
+    const oldName = currentUser.displayName;
     currentUser.displayName = nn;
     localStorage.setItem('userNickname', nn);
     localStorage.setItem('userAvatar', currentUser.avatar || '');
-    // 清除自己的缓存，确保已读列表刷新时显示新名字
+    // 清除自己的缓存
     delete userInfoCache[currentUser.uid];
+
+    // 更新用户节点
     db.ref('users/' + currentUser.uid).set({
       displayName: nn, avatar: currentUser.avatar || '',
       lastSeen: firebase.database.ServerValue.TIMESTAMP
+    }).then(() => {
+      // ★ 修复3：改名后批量更新所有自己发的消息中的 senderName
+      if (oldName !== nn) {
+        db.ref('messages').orderByChild('senderId').equalTo(currentUser.uid).once('value').then(snap => {
+          const updates = {};
+          snap.forEach(c => { updates['messages/' + c.key + '/senderName'] = nn; });
+          if (Object.keys(updates).length > 0) db.ref().update(updates);
+        });
+
+        // ★ 修复1：同步更新好友关系中自己的 displayName
+        db.ref('friends').once('value').then(snap => {
+          const updates = {};
+          snap.forEach(userSnap => {
+            const uid = userSnap.key;
+            userSnap.forEach(friendSnap => {
+              if (friendSnap.key === currentUser.uid) {
+                updates['friends/' + uid + '/' + currentUser.uid + '/displayName'] = nn;
+                updates['friends/' + uid + '/' + currentUser.uid + '/avatar'] = currentUser.avatar || '';
+              }
+            });
+          });
+          if (Object.keys(updates).length > 0) db.ref().update(updates);
+        });
+      }
     }).catch(err => console.error('保存设置失败:', err));
     settingsModal.classList.remove('show');
   }
@@ -198,7 +257,6 @@ friendSearchBtn.addEventListener('click', () => {
 
   friendSearchResults.innerHTML = '<div class="search-result-item">搜索中...</div>';
 
-  // 按 displayName 模糊查询（不区分大小写）
   db.ref('users').once('value').then(snap => {
     friendSearchResults.innerHTML = '';
     const lowerName = name.toLowerCase();
@@ -206,12 +264,11 @@ friendSearchBtn.addEventListener('click', () => {
     snap.forEach(child => {
       const u = child.val();
       const uid = child.key;
-      if (uid === currentUser.uid) return; // 跳过自己
-      if (!u.displayName || !u.displayName.toLowerCase().includes(lowerName)) return; // 不匹配
+      if (uid === currentUser.uid) return;
+      if (!u.displayName || !u.displayName.toLowerCase().includes(lowerName)) return;
       found++;
 
       if (friends.some(f => f.uid === uid)) {
-        // 已是好友
         const item = document.createElement('div');
         item.className = 'search-result-item';
         item.innerHTML = `<img src="${getAvatarUrl(u)}" class="search-result-avatar" alt=""><span class="search-result-name">${escapeHtml(u.displayName)}</span><span style="color:#999;font-size:13px">已是好友</span>`;
@@ -226,14 +283,11 @@ friendSearchBtn.addEventListener('click', () => {
         const btn = item.querySelector('.send-request-btn');
         btn.disabled = true;
         btn.textContent = '发送中...';
-        console.log('[好友请求] 发送到:', 'friendRequests/' + uid + '/' + currentUser.uid);
         db.ref('friendRequests/' + uid + '/' + currentUser.uid).set({
           fromUid: currentUser.uid, fromName: currentUser.displayName, fromAvatar: currentUser.avatar || '', timestamp: firebase.database.ServerValue.TIMESTAMP
         }).then(() => {
-          console.log('[好友请求] 发送成功');
           btn.outerHTML = '<span style="color:#28a745;font-size:13px">✓ 已发送</span>';
         }).catch(err => {
-          console.error('[好友请求] 发送失败:', err);
           btn.disabled = false;
           btn.textContent = '添加';
           alert('发送失败: ' + err.message);
@@ -242,17 +296,15 @@ friendSearchBtn.addEventListener('click', () => {
       friendSearchResults.appendChild(item);
     });
     if (found === 0) { friendSearchResults.innerHTML = '<div class="search-result-item">未找到匹配的用户</div>'; }
-  }).catch(err => { console.error('搜索用户失败:', err); friendSearchResults.innerHTML = '<div class="search-result-item">搜索失败，请重试</div>'; });
+  }).catch(err => { friendSearchResults.innerHTML = '<div class="search-result-item">搜索失败，请重试</div>'; });
 });
 
 function loadFriendRequests() {
   if (!currentUser) return;
   if (requestsListenerRef && requestsListenerCallback) requestsListenerRef.off('value', requestsListenerCallback);
   requestsListenerRef = db.ref('friendRequests/' + currentUser.uid);
-  console.log('[好友请求] 监听路径:', 'friendRequests/' + currentUser.uid);
   requestsListenerCallback = snap => {
     const c = snap.numChildren();
-    console.log('[好友请求] 收到更新, 数量:', c, '数据:', snap.val());
     requestBadge.textContent = c;
     requestBadge.style.display = c > 0 ? 'inline' : 'none';
   };
@@ -273,21 +325,42 @@ function renderFriendRequests() {
       item.querySelector('.accept-btn').addEventListener('click', () => {
         const mi = { uid: currentUser.uid, displayName: currentUser.displayName, avatar: currentUser.avatar || '' };
         const oi = { uid: fromUid, displayName: req.fromName || '', avatar: req.fromAvatar || '' };
-        Promise.all([db.ref('friends/' + currentUser.uid + '/' + fromUid).set(oi), db.ref('friends/' + fromUid + '/' + currentUser.uid).set(mi), db.ref('friendRequests/' + currentUser.uid + '/' + fromUid).remove()])
-          .then(() => { item.innerHTML = `<span class="search-result-name">${escapeHtml(req.fromName || '好友')}</span><span style="color:#28a745">✓ 已添加</span>`; })
-          .catch(err => console.error('接受好友请求失败:', err));
+        Promise.all([
+          db.ref('friends/' + currentUser.uid + '/' + fromUid).set(oi),
+          db.ref('friends/' + fromUid + '/' + currentUser.uid).set(mi),
+          db.ref('friendRequests/' + currentUser.uid + '/' + fromUid).remove()
+        ]).then(() => {
+          item.innerHTML = `<span class="search-result-name">${escapeHtml(req.fromName || '好友')}</span><span style="color:#28a745">✓ 已添加</span>`;
+        }).catch(err => console.error('接受好友请求失败:', err));
       });
-      item.querySelector('.reject-btn').addEventListener('click', () => { db.ref('friendRequests/' + currentUser.uid + '/' + fromUid).remove().then(() => item.remove()); });
+      item.querySelector('.reject-btn').addEventListener('click', () => {
+        db.ref('friendRequests/' + currentUser.uid + '/' + fromUid).remove().then(() => item.remove());
+      });
       friendRequestsList.appendChild(item);
     });
   });
 }
 
+// ★ 修复1：loadFriends 实时监听好友列表，并刷新每个好友的最新用户信息
 function loadFriends() {
   if (!currentUser) return;
   if (friendsListenerRef && friendsListenerCallback) friendsListenerRef.off('value', friendsListenerCallback);
   friendsListenerRef = db.ref('friends/' + currentUser.uid);
-  friendsListenerCallback = snap => { friends = []; snap.forEach(c => { const f = c.val(); f.uid = c.key; friends.push(f); }); renderFriendsList(); };
+  friendsListenerCallback = snap => {
+    friends = [];
+    const promises = [];
+    snap.forEach(c => {
+      const f = c.val();
+      f.uid = c.key;
+      // 强制从 users 节点拉取最新 displayName/avatar
+      promises.push(refreshUserInfo(f.uid).then(latest => {
+        f.displayName = latest.displayName;
+        f.avatar = latest.avatar;
+        friends.push(f);
+      }));
+    });
+    Promise.all(promises).then(() => renderFriendsList());
+  };
   friendsListenerRef.on('value', friendsListenerCallback);
 }
 
@@ -305,9 +378,7 @@ function renderFriendsList() {
       </div>
       <button class="delete-friend-btn" title="删除好友">✕</button>
     `;
-    // 点击头像/名字进入私聊
     item.querySelector('.friend-item-content').addEventListener('click', () => { if (pc) selectChat(pc); else createPrivateChatWith(f); });
-    // 点击删除按钮
     item.querySelector('.delete-friend-btn').addEventListener('click', (e) => {
       e.stopPropagation();
       if (!confirm(`确定要删除好友「${f.displayName}」吗？\n相关的私聊记录也会被清除。`)) return;
@@ -325,10 +396,8 @@ function createPrivateChatWith(friend) {
 
 function deleteFriend(friend, privateChat) {
   const updates = {};
-  // 双向删除好友关系
   updates['friends/' + currentUser.uid + '/' + friend.uid] = null;
   updates['friends/' + friend.uid + '/' + currentUser.uid] = null;
-  // 删除私聊及消息
   if (privateChat) {
     updates['chats/' + privateChat.id] = null;
     if (currentChat && currentChat.id === privateChat.id) {
@@ -338,19 +407,18 @@ function deleteFriend(friend, privateChat) {
       chatMessages.innerHTML = '<div style="text-align:center;color:#999;margin-top:50px">选择一个聊天开始对话</div>';
       chatInputArea.style.display = 'none';
     }
-    // 删除该私聊的所有消息
     db.ref('messages').orderByChild('chatId').equalTo(privateChat.id).once('value').then(snap => {
       const msgUpdates = {};
       snap.forEach(c => { msgUpdates['messages/' + c.key] = null; });
       if (Object.keys(msgUpdates).length > 0) db.ref().update(msgUpdates);
     });
   }
-  db.ref().update(updates)
-    .then(() => { console.log('[删除好友] 成功:', friend.displayName); })
-    .catch(err => { console.error('[删除好友] 失败:', err); alert('删除失败，请重试'); });
+  db.ref().update(updates).catch(err => { alert('删除失败，请重试'); });
 }
 
-// ====== 创建群聊 ======
+// ========================================================================
+//  创建群聊
+// ========================================================================
 function renderGroupFriendPicker() {
   groupFriendList.innerHTML = '';
   if (friends.length === 0) { groupFriendList.innerHTML = '<div style="color:#999;font-size:13px;padding:10px">暂无好友，请先添加好友</div>'; return; }
@@ -373,10 +441,8 @@ createGroupSubmit.addEventListener('click', () => {
 });
 
 // ========================================================================
-//  群管理面板（统一管理：成员、邀请、删除）
+//  群管理面板
 // ========================================================================
-
-// 切换群管理面板
 toggleMgmtBtn.addEventListener('click', () => {
   if (!currentChat || currentChat.type !== 'group') return;
   const show = groupMgmtPanel.style.display === 'none';
@@ -391,7 +457,6 @@ function renderGroupMgmtPanel() {
 
   mgmtMemberCount.textContent = `(${members.length} 人)`;
 
-  // 渲染成员列表
   mgmtMembersList.innerHTML = '<div style="color:#999;font-size:13px;padding:5px">加载中...</div>';
   batchGetUserInfo(members).then(infos => {
     mgmtMembersList.innerHTML = '';
@@ -418,7 +483,6 @@ function renderGroupMgmtPanel() {
     });
   });
 
-  // 渲染邀请列表（不在群内的好友）
   const invitable = friends.filter(f => !members.includes(f.uid));
   mgmtInviteList.innerHTML = '';
   if (invitable.length === 0) {
@@ -438,11 +502,9 @@ function renderGroupMgmtPanel() {
     });
   }
 
-  // 删除按钮（仅群主可见）
   mgmtDeleteSection.style.display = isOwner ? 'block' : 'none';
 }
 
-// 删除群聊
 deleteGroupBtn.addEventListener('click', () => {
   if (!currentChat || currentChat.createdBy !== currentUser.uid) { alert('只有群主才能删除群聊'); return; }
   deleteConfirmModal.classList.add('show');
@@ -463,33 +525,26 @@ confirmDelete.addEventListener('click', () => {
     chatMessages.innerHTML = '<div style="text-align:center;color:#999;margin-top:50px">群聊已删除</div>';
     chatInputArea.style.display = 'none';
     renderChatList(); renderFriendsList();
-  }).catch(err => { console.error('删除失败:', err); alert('删除失败，请重试'); });
+  }).catch(err => { alert('删除失败，请重试'); });
 });
 
-// 更新群信息栏
 function updateGroupInfoBar() {
   if (!currentChat || currentChat.type !== 'group') { groupInfoBar.style.display = 'none'; groupMgmtPanel.style.display = 'none'; return; }
   groupInfoBar.style.display = 'flex';
   groupInfoName.textContent = currentChat.name;
   groupInfoCount.textContent = currentChat.id === 'world-chat' ? '公开群聊' : `${(currentChat.members || []).length} 人`;
-  // 世界群聊隐藏管理按钮
   toggleMgmtBtn.style.display = currentChat.id === 'world-chat' ? 'none' : 'inline-block';
 }
 
 // ========================================================================
-//  已读未读详情（实时拉取最新昵称）
+//  已读未读详情
 // ========================================================================
-
-cancelReadStatus.addEventListener('click', () => readStatusModal.classList.remove('show'));
-
 function showReadStatusDetail(message) {
   if (!currentChat || currentChat.type !== 'group' || !message) return;
 
   const allMembers = (currentChat.members || []).slice();
-  // 发送者不参与已读/未读判定
   const otherMembers = allMembers.filter(uid => uid !== message.senderId);
   const readByUids = message.readBy ? Object.keys(message.readBy) : [];
-  // 已读 = readBy 中除了发送者之外的成员
   const readUids = readByUids.filter(uid => uid !== message.senderId && otherMembers.includes(uid));
   const unreadUids = otherMembers.filter(uid => !readByUids.includes(uid));
 
@@ -498,7 +553,6 @@ function showReadStatusDetail(message) {
   readMembersList.innerHTML = '<div style="color:#999;font-size:13px;padding:5px">加载中...</div>';
   unreadMembersList.innerHTML = '<div style="color:#999;font-size:13px;padding:5px">加载中...</div>';
 
-  // 实时从 Firebase 拉取最新昵称
   batchGetUserInfo(readUids).then(infos => {
     readMembersList.innerHTML = '';
     if (infos.length === 0) { readMembersList.innerHTML = '<div style="color:#999;font-size:13px;padding:5px">暂无</div>'; return; }
@@ -525,7 +579,111 @@ function showReadStatusDetail(message) {
 }
 
 // ========================================================================
-//  聊天核心
+//  ★ 右键菜单
+// ========================================================================
+contextMenu.addEventListener('click', e => e.stopPropagation());
+
+$('ctx-recall').addEventListener('click', () => {
+  if (!contextMessageId || !contextMessage) return;
+  contextMenu.classList.remove('show');
+
+  // 检查是否是自己的消息
+  if (contextMessage.senderId !== currentUser.uid) {
+    alert('只能撤回自己发送的消息');
+    return;
+  }
+
+  // 检查是否在2分钟内
+  const now = Date.now();
+  const msgTime = contextMessage.timestamp;
+  if (now - msgTime > 2 * 60 * 1000) {
+    alert('只能撤回2分钟内发送的消息');
+    return;
+  }
+
+  // 用 recalled 标记替代删除，显示"已撤回一条消息"
+  db.ref('messages/' + contextMessageId).update({
+    text: '',
+    recalled: true,
+    recallTime: firebase.database.ServerValue.TIMESTAMP
+  }).catch(err => alert('撤回失败'));
+});
+
+$('ctx-quote').addEventListener('click', () => {
+  if (!contextMessage) return;
+  contextMenu.classList.remove('show');
+  quotingMessage = contextMessage;
+  // 显示引用预览
+  quotePreviewContent.innerHTML = `<strong>${escapeHtml(contextMessage.senderName || '未知')}</strong>: ${escapeHtml((contextMessage.text || '').substring(0, 100))}`;
+  quotePreviewBar.style.display = 'flex';
+  chatInput.focus();
+});
+
+$('ctx-delete').addEventListener('click', () => {
+  if (!contextMessageId) return;
+  contextMenu.classList.remove('show');
+  // 本地删除（仅对自己隐藏）
+  if (!currentUser) return;
+  const msgId = contextMessageId;
+  db.ref('messages/' + msgId + '/deletedFor/' + currentUser.uid).set(true)
+    .catch(err => alert('删除失败'));
+});
+
+$('ctx-forward').addEventListener('click', () => {
+  if (!contextMessage) return;
+  contextMenu.classList.remove('show');
+  // 打开转发模态框
+  forwardMsgPreview.innerHTML = `<div style="padding:8px;background:#f8f9fa;border-radius:6px;margin-bottom:10px;font-size:13px"><strong>${escapeHtml(contextMessage.senderName || '未知')}</strong>: ${escapeHtml((contextMessage.text || '').substring(0, 200))}</div>`;
+  renderForwardGroupPicker();
+  forwardModal.classList.add('show');
+});
+
+$('ctx-mention').addEventListener('click', () => {
+  if (!contextMessage) return;
+  contextMenu.classList.remove('show');
+  const mentionName = contextMessage.senderName || '未知用户';
+  chatInput.value += `@${mentionName} `;
+  chatInput.focus();
+});
+
+function renderForwardGroupPicker() {
+  forwardGroupList.innerHTML = '';
+  const groupChatsList = chats.filter(c => c.type === 'group' && c.id !== (currentChat && currentChat.id));
+  if (groupChatsList.length === 0) {
+    forwardGroupList.innerHTML = '<div style="color:#999;font-size:13px;padding:10px">暂无其他群聊可转发</div>';
+    return;
+  }
+  groupChatsList.forEach(c => {
+    const label = document.createElement('label');
+    label.className = 'group-friend-item';
+    label.innerHTML = `<input type="radio" name="forward-target" value="${escapeHtml(c.id)}" class="forward-radio"><span>${escapeHtml(c.name)}</span>`;
+    forwardGroupList.appendChild(label);
+  });
+}
+
+confirmForward.addEventListener('click', () => {
+  const selected = forwardGroupList.querySelector('input[name="forward-target"]:checked');
+  if (!selected || !contextMessage) return;
+  const targetChatId = selected.value;
+  const targetChat = chats.find(c => c.id === targetChatId);
+  if (!targetChat) return;
+
+  db.ref('messages').push({
+    chatId: targetChatId,
+    senderId: currentUser.uid,
+    senderName: currentUser.displayName,
+    text: contextMessage.text || '',
+    timestamp: firebase.database.ServerValue.TIMESTAMP,
+    readBy: { [currentUser.uid]: true },
+    forwardedFrom: contextMessage.senderName || '未知用户'
+  }).then(() => {
+    forwardModal.classList.remove('show');
+    alert('转发成功！');
+  }).catch(err => alert('转发失败'));
+});
+
+// ========================================================================
+//  ★ 聊天核心 — 发送消息（支持引用）
 // ========================================================================
 sendBtn.addEventListener('click', sendMessage);
 chatInput.addEventListener('keypress', e => { if (e.key === 'Enter') sendMessage(); });
@@ -533,26 +691,43 @@ chatInput.addEventListener('keypress', e => { if (e.key === 'Enter') sendMessage
 function sendMessage() {
   const text = chatInput.value.trim();
   if (!text || !currentChat || !currentUser) return;
-  // 权限校验：非公开群聊必须是成员才能发消息
   if (currentChat.type === 'group' && !currentChat.public && (!currentChat.members || !currentChat.members.includes(currentUser.uid))) {
     alert('你不是该群聊的成员，无法发送消息');
     return;
   }
-  db.ref('messages').push({
+
+  const msgData = {
     chatId: currentChat.id, senderId: currentUser.uid,
     senderName: currentUser.displayName, text,
     timestamp: firebase.database.ServerValue.TIMESTAMP,
     readBy: { [currentUser.uid]: true }
-  }).then(() => { chatInput.value = ''; }).catch(err => console.error('发送失败:', err));
+  };
+
+  // 如果有引用消息，附加引用信息
+  if (quotingMessage) {
+    msgData.quote = {
+      senderName: quotingMessage.senderName || '未知',
+      text: (quotingMessage.text || '').substring(0, 200),
+      messageId: quotingMessage._id || ''
+    };
+    quotingMessage = null;
+    quotePreviewBar.style.display = 'none';
+  }
+
+  db.ref('messages').push(msgData)
+    .then(() => { chatInput.value = ''; })
+    .catch(err => console.error('发送失败:', err));
 }
 
+// ========================================================================
+//  ★ 聊天列表 & 消息加载
+// ========================================================================
 function loadChats() {
   if (chatsListenerRef && chatsListenerCallback) chatsListenerRef.off('value', chatsListenerCallback);
   chatsListenerRef = db.ref('chats');
   chatsListenerCallback = snap => {
     const nc = [];
     snap.forEach(c => { const ch = c.val(); ch.id = c.key; if ((ch.type === 'group' && (ch.public || (ch.members && ch.members.includes(currentUser.uid)))) || (ch.type === 'private' && ch.members && ch.members.includes(currentUser.uid))) nc.push(ch); });
-    // 世界群聊常驻，始终排在第一位
     nc.unshift({ id: 'world-chat', name: '世界群聊', type: 'group', public: true, members: [] });
     chats = nc;
     renderChatList(); renderFriendsList();
@@ -577,7 +752,7 @@ function selectChat(chat) {
   currentChat = chat;
   renderChatList(); renderFriendsList();
   loadMessages(); markChatAsRead(); updateGroupInfoBar();
-  groupMgmtPanel.style.display = 'none'; // 切换聊天时收起管理面板
+  groupMgmtPanel.style.display = 'none';
 }
 
 function loadMessages() {
@@ -590,26 +765,77 @@ function loadMessages() {
   activeMessagesCallback = snap => {
     if (!currentChat) return;
     chatMessages.innerHTML = '';
-    snap.forEach(c => { const m = c.val(); if (m) renderMessage(m); });
+    snap.forEach(c => {
+      const m = c.val();
+      if (m) {
+        m._id = c.key; // 保存消息ID用于操作
+        // 检查是否被当前用户删除
+        if (m.deletedFor && m.deletedFor[currentUser.uid]) return;
+        renderMessage(m, c.key);
+      }
+    });
     chatMessages.scrollTop = chatMessages.scrollHeight;
   };
   activeMessagesRef = queryRef;
   queryRef.on('value', activeMessagesCallback);
 }
 
-function renderMessage(message) {
+function renderMessage(message, msgKey) {
   if (!message || !currentUser) return;
   const isSent = message.senderId === currentUser.uid;
   const el = document.createElement('div');
   el.className = `message ${isSent ? 'sent' : 'received'}`;
+  el.dataset.msgKey = msgKey;
+
+  // ★ 撤回消息显示
+  if (message.recalled) {
+    el.innerHTML = `
+      <div class="message-body" style="width:100%;align-items:center">
+        <div class="message-content" style="background:#f0f0f0;color:#999;font-style:italic;font-size:13px">
+          ${isSent ? '你' : escapeHtml(message.senderName || '对方')}撤回了一条消息
+        </div>
+      </div>
+    `;
+    chatMessages.appendChild(el);
+    return;
+  }
+
+  // ★ 修复3：实时获取最新昵称显示
+  let senderDisplayName = message.senderName || '未知用户';
+  // 如果是自己发的消息，直接用当前昵称
+  if (isSent) {
+    senderDisplayName = currentUser.displayName;
+  } else if (userInfoCache[message.senderId]) {
+    senderDisplayName = userInfoCache[message.senderId].displayName;
+  } else {
+    // 异步刷新缓存并更新DOM
+    refreshUserInfo(message.senderId).then(info => {
+      const nameEl = el.querySelector('.message-sender');
+      if (nameEl) nameEl.textContent = info.displayName;
+      const avatarEl = el.querySelector('.message-avatar img');
+      if (avatarEl) avatarEl.src = getAvatarUrl(info);
+    });
+  }
 
   let content = escapeHtml(message.text || '');
   content = content.replace(/(https?:\/\/[^\s"']*\.(?:png|jpg|jpeg|gif|webp))/gi, '<img src="$1" alt="图片">');
   content = content.replace(/(https?:\/\/[^\s"']+)/gi, m => m.includes('<img') ? m : `<a href="${m}" target="_blank" rel="noopener noreferrer">${m}</a>`);
 
+  // ★ 引用消息渲染
+  let quoteHtml = '';
+  if (message.quote) {
+    quoteHtml = `<div class="message-quote"><strong>${escapeHtml(message.quote.senderName)}</strong>: ${escapeHtml((message.quote.text || '').substring(0, 100))}</div>`;
+  }
+
+  // ★ 转发标记
+  let forwardHtml = '';
+  if (message.forwardedFrom) {
+    forwardHtml = `<div class="message-forward-tag">↩ 转发自 ${escapeHtml(message.forwardedFrom)}</div>`;
+  }
+
+  // 已读未读
   let readStatusHtml = '';
   if (currentChat && currentChat.type === 'group') {
-    // ★ 修复：发送者不计入已读数
     const allMembers = currentChat.members || [];
     const otherMembers = allMembers.filter(uid => uid !== message.senderId);
     const readByUids = message.readBy ? Object.keys(message.readBy) : [];
@@ -617,10 +843,8 @@ function renderMessage(message) {
     const unreadCount = otherMembers.length - readCount;
 
     if (isSent) {
-      // 自己的消息：可点击查看详情
-      readStatusHtml = `<div class="message-read-status clickable-read" data-msg='${escapeHtml(JSON.stringify({senderId:message.senderId, readBy:message.readBy||{}}))}'>${readCount}已读 ${unreadCount}未读</div>`;
+      readStatusHtml = `<div class="message-read-status clickable-read">${readCount}已读 ${unreadCount}未读</div>`;
     } else {
-      // 别人的消息：只显示已读标记
       const iRead = readByUids.includes(currentUser.uid);
       readStatusHtml = `<div class="message-status">${iRead ? '已读' : '未读'}</div>`;
     }
@@ -629,30 +853,65 @@ function renderMessage(message) {
     readStatusHtml = `<div class="message-status">${readByOthers ? '已读' : '未读'}</div>`;
   }
 
+  const avatarSrc = isSent ? getAvatarUrl(currentUser) : getAvatarUrl(userInfoCache[message.senderId] || message);
+
   el.innerHTML = `
-    <div class="message-avatar"><img src="${isSent ? getAvatarUrl(currentUser) : getAvatarUrl(message)}" alt="头像"></div>
+    <div class="message-avatar"><img src="${avatarSrc}" alt="头像"></div>
     <div class="message-body">
-      <div class="message-sender">${escapeHtml(message.senderName || '未知用户')}</div>
+      <div class="message-sender">${escapeHtml(senderDisplayName)}</div>
+      ${forwardHtml}
+      ${quoteHtml}
       <div class="message-content-wrapper">${readStatusHtml}<div class="message-content">${content}</div></div>
     </div>
   `;
 
-  // 绑定已读详情点击事件
+  // 已读详情点击
   const readEl = el.querySelector('.clickable-read');
   if (readEl) {
     readEl.addEventListener('click', () => showReadStatusDetail(message));
   }
 
+  // ★ 右键菜单绑定
+  el.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    contextMessage = message;
+    contextMessageId = msgKey;
+
+    // 自己的消息：显示撤回（2分钟内），隐藏@
+    // 别人的消息：隐藏撤回，显示@
+    const canRecall = isSent && !message.recalled && (Date.now() - message.timestamp < 2 * 60 * 1000);
+    $('ctx-recall').style.display = canRecall ? 'block' : 'none';
+    $('ctx-mention').style.display = isSent ? 'none' : 'block';
+
+    // 定位：相对 .chat-main 的坐标
+    const chatMain = document.querySelector('.chat-main');
+    const rect = chatMain.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    contextMenu.style.left = Math.min(x, chatMain.offsetWidth - 160) + 'px';
+    contextMenu.style.top = Math.min(y, chatMain.offsetHeight - 200) + 'px';
+    contextMenu.classList.add('show');
+  });
+
   chatMessages.appendChild(el);
 }
 
+// ========================================================================
+//  ★ 修复2：已读标记逻辑优化
+// ========================================================================
 function updateUnreadCount(chatId) {
   if (!currentUser) return;
   if (unreadListeners[chatId]) unreadListeners[chatId].ref.off('value', unreadListeners[chatId].callback);
   const ref = db.ref('messages').orderByChild('chatId').equalTo(chatId);
   const cb = snap => {
     let count = 0;
-    snap.forEach(c => { const m = c.val(); if (m.senderId !== currentUser.uid && (!m.readBy || !m.readBy[currentUser.uid])) count++; });
+    snap.forEach(c => {
+      const m = c.val();
+      if (m.recalled) return; // 撤回消息不计未读
+      if (m.deletedFor && m.deletedFor[currentUser.uid]) return; // 已删除不计
+      if (m.senderId !== currentUser.uid && (!m.readBy || !m.readBy[currentUser.uid])) count++;
+    });
     const el = document.getElementById(`unread-${chatId}`);
     if (el) { el.textContent = count; el.style.display = count > 0 ? 'flex' : 'none'; }
   };
@@ -662,9 +921,21 @@ function updateUnreadCount(chatId) {
 
 function markChatAsRead() {
   if (!currentChat || !currentUser) return;
+  // ★ 修复：使用事务逐条标记，避免 once 竞态
   db.ref('messages').orderByChild('chatId').equalTo(currentChat.id).once('value', snap => {
-    snap.forEach(c => { const m = c.val(); if (m.senderId !== currentUser.uid) { const u = {}; if (!m.readBy) u['readBy'] = {}; u[`readBy/${currentUser.uid}`] = true; c.ref.update(u).catch(err => console.error('标记已读失败:', err)); } });
-  }).catch(err => console.error('获取消息失败:', err));
+    const updates = {};
+    snap.forEach(c => {
+      const m = c.val();
+      // 只标记别人发的消息
+      if (m.senderId === currentUser.uid) return;
+      // 如果已经标记过就跳过
+      if (m.readBy && m.readBy[currentUser.uid]) return;
+      updates['messages/' + c.key + '/readBy/' + currentUser.uid] = true;
+    });
+    if (Object.keys(updates).length > 0) {
+      db.ref().update(updates).catch(err => console.error('批量标记已读失败:', err));
+    }
+  });
 }
 
 // ========================================================================

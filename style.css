@@ -135,6 +135,7 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative;
 }
 
 /* 群聊信息栏 */
@@ -251,10 +252,18 @@ body {
   display: flex;
   align-items: flex-end;
   max-width: 80%;
+  cursor: default;
+  user-select: text;
+  transition: background 0.15s;
 }
 
 .message.sent { flex-direction: row-reverse; margin-left: auto; }
 .message.received { flex-direction: row; margin-right: auto; }
+
+.message.received:hover {
+  background: rgba(0, 123, 255, 0.04);
+  border-radius: 8px;
+}
 
 .message-avatar {
   width: 40px;
@@ -307,11 +316,12 @@ body {
 .message.sent .message-content {
   background-color: #007bff;
   border-top-right-radius: 2px;
-  color: #333;
+  color: #fff;
 }
 
 .message-content img { max-width: 100%; max-height: 300px; border-radius: 5px; margin-top: 5px; }
-.message-content a { color: #007bff; text-decoration: none; }
+.message.sent .message-content a { color: #fff; text-decoration: underline; }
+.message.received .message-content a { color: #007bff; text-decoration: none; }
 .message-content a:hover { text-decoration: underline; }
 
 .message-status, .message-read-status {
@@ -335,8 +345,105 @@ body {
   transition: color 0.15s;
 }
 
-.clickable-read:hover {
-  color: #0056b3;
+.clickable-read:hover { color: #0056b3; }
+
+/* ★ 引用消息样式 */
+.message-quote {
+  background: rgba(0, 0, 0, 0.06);
+  border-left: 3px solid #007bff;
+  padding: 6px 10px;
+  margin-bottom: 6px;
+  border-radius: 0 6px 6px 0;
+  font-size: 12px;
+  color: #555;
+  max-width: 100%;
+  word-break: break-word;
+}
+
+.message.sent .message-quote {
+  background: rgba(0, 0, 0, 0.15);
+  border-left-color: rgba(255, 255, 255, 0.8);
+  color: #222;
+}
+
+/* ★ 转发标记 */
+.message-forward-tag {
+  font-size: 11px;
+  color: #6c757d;
+  margin-bottom: 4px;
+  font-style: italic;
+}
+
+.message.sent .message-forward-tag {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+/* ====== 引用预览栏 ====== */
+.quote-preview-bar {
+  display: flex;
+  align-items: center;
+  padding: 8px 15px;
+  background: #f0f4ff;
+  border-top: 1px solid #d0d9f0;
+  flex-shrink: 0;
+  gap: 10px;
+}
+
+.quote-preview-content {
+  flex: 1;
+  font-size: 13px;
+  color: #444;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-left: 3px solid #007bff;
+  padding-left: 8px;
+}
+
+.quote-preview-close {
+  background: none;
+  border: none;
+  font-size: 16px;
+  cursor: pointer;
+  color: #999;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.quote-preview-close:hover { background: rgba(0,0,0,0.08); color: #333; }
+
+/* ====== ★ 右键菜单 ====== */
+.context-menu {
+  position: absolute;
+  background: white;
+  border: 1px solid #dee2e6;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  z-index: 100;
+  display: none;
+  min-width: 140px;
+  padding: 6px 0;
+  animation: ctxFadeIn 0.12s ease;
+}
+
+.context-menu.show { display: block; }
+
+@keyframes ctxFadeIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.context-menu-item {
+  padding: 9px 16px;
+  cursor: pointer;
+  font-size: 14px;
+  color: #333;
+  transition: background 0.1s;
+}
+
+.context-menu-item:hover {
+  background-color: #e8f0fe;
+  color: #007bff;
 }
 
 /* ====== 输入区域 ====== */
@@ -496,7 +603,8 @@ body {
 
 .group-friend-item:hover { background-color: #f0f0f0; }
 
-.group-friend-item input[type="checkbox"] {
+.group-friend-item input[type="checkbox"],
+.group-friend-item input[type="radio"] {
   width: 18px;
   height: 18px;
   margin: 0;
@@ -575,11 +683,10 @@ body {
   transition: opacity 0.2s, color 0.2s;
 }
 
-.friend-list-item:hover .delete-friend-btn {
-  opacity: 1;
-}
+.friend-list-item:hover .delete-friend-btn { opacity: 1; }
+.delete-friend-btn:hover { color: #dc3545; background: rgba(220, 53, 69, 0.1); }
 
-.delete-friend-btn:hover {
-  color: #dc3545;
-  background: rgba(220, 53, 69, 0.1);
+/* ====== 转发预览 ====== */
+.forward-quote-preview {
+  margin-bottom: 10px;
 }
