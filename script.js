@@ -107,6 +107,15 @@ const aliasAvatar = $('alias-avatar');
 const aliasName = $('alias-name');
 const saveAlias = $('save-alias');
 const cancelAlias = $('cancel-alias');
+const avatarPopover = $('avatar-popover');
+const popoverAvatar = $('popover-avatar');
+const popoverName = $('popover-name');
+const popoverMention = $('popover-mention');
+const popoverAddFriend = $('popover-add-friend');
+const popoverAlreadyFriend = $('popover-already-friend');
+
+// 头像浮窗上下文
+let popoverTargetUser = null;
 
 // 当前正在编辑备注的好友
 let currentAliasFriend = null;
@@ -214,6 +223,54 @@ quotePreviewClose.addEventListener('click', () => { quotingMessage = null; quote
 
 document.querySelectorAll('.modal').forEach(modal => {
   modal.addEventListener('click', e => { if (e.target === modal) modal.classList.remove('show'); });
+});
+
+// ========================================================================
+//  头像点击浮窗
+// ========================================================================
+document.addEventListener('click', e => {
+  // 点击浮窗外部关闭
+  if (!avatarPopover.contains(e.target) && !e.target.closest('.message-avatar')) {
+    avatarPopover.classList.remove('show');
+  }
+  // 关闭好友操作下拉
+  if (!e.target.closest('.friend-actions-wrap')) {
+    document.querySelectorAll('.friend-actions-wrap.open').forEach(w => w.classList.remove('open'));
+  }
+});
+
+// 阻止浮窗内部点击冒泡
+avatarPopover.addEventListener('click', e => e.stopPropagation());
+
+popoverMention.addEventListener('click', () => {
+  if (!popoverTargetUser || !currentUser) return;
+  if (popoverTargetUser.uid === currentUser.uid) { avatarPopover.classList.remove('show'); return; }
+  const friend = friends.find(f => f.uid === popoverTargetUser.uid);
+  const mentionName = (friend && friend.alias) || popoverTargetUser.displayName || '未知用户';
+  chatInput.value += `@${mentionName} `;
+  chatInput.focus();
+  avatarPopover.classList.remove('show');
+});
+
+popoverAddFriend.addEventListener('click', () => {
+  if (!popoverTargetUser || !currentUser) return;
+  const btn = popoverAddFriend;
+  btn.textContent = '发送中...';
+  btn.style.pointerEvents = 'none';
+  db.ref('friendRequests/' + popoverTargetUser.uid + '/' + currentUser.uid).set({
+    fromUid: currentUser.uid,
+    fromName: currentUser.displayName,
+    fromAvatar: currentUser.avatar || '',
+    timestamp: firebase.database.ServerValue.TIMESTAMP
+  }).then(() => {
+    btn.textContent = '✓ 已发送请求';
+    btn.style.background = '#28a745';
+    btn.style.color = 'white';
+    setTimeout(() => avatarPopover.classList.remove('show'), 800);
+  }).catch(() => {
+    btn.textContent = '添加好友';
+    btn.style.pointerEvents = 'auto';
+  });
 });
 
 // ========================================================================
@@ -414,7 +471,23 @@ function renderFriendsList() {
       </div>
     `;
     item.querySelector('.friend-item-content').addEventListener('click', () => { if (pc) selectChat(pc); else createPrivateChatWith(f); });
-    // 操作菜单
+    // 操作菜单 — 悬浮停留 1 秒，点击也可切换
+    const actionsWrap = item.querySelector('.friend-actions-wrap');
+    const actionsBtn = item.querySelector('.friend-actions-btn');
+    let dropdownTimer = null;
+    const openDropdown = () => { clearTimeout(dropdownTimer); actionsWrap.classList.add('open'); };
+    const closeDropdown = () => { dropdownTimer = setTimeout(() => actionsWrap.classList.remove('open'), 500); };
+    actionsWrap.addEventListener('mouseenter', openDropdown);
+    actionsWrap.addEventListener('mouseleave', closeDropdown);
+    actionsBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      if (actionsWrap.classList.contains('open')) {
+        actionsWrap.classList.remove('open');
+      } else {
+        openDropdown();
+      }
+    });
+    // 点击菜单项后立即关闭
     item.querySelectorAll('.friend-action-item').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -927,6 +1000,55 @@ function renderMessage(message, msgKey) {
   const readEl = el.querySelector('.clickable-read');
   if (readEl) {
     readEl.addEventListener('click', () => showReadStatusDetail(message));
+  }
+
+  // ★ 头像点击 → 弹出操作浮窗（@TA / 添加好友）
+  const avatarEl = el.querySelector('.message-avatar');
+  if (avatarEl && !isSent) {
+    avatarEl.style.cursor = 'pointer';
+    avatarEl.addEventListener('click', (e) => {
+      e.stopPropagation();
+      contextMenu.classList.remove('show'); // 关闭右键菜单
+
+      // 获取发送者信息
+      const senderUid = message.senderId;
+      const senderInfo = userInfoCache[senderUid] || {};
+      const friend = friends.find(f => f.uid === senderUid);
+      const displayName = (friend && friend.alias) || message.senderName || senderInfo.displayName || '未知用户';
+      const avatarSrc = getAvatarUrl(senderInfo.avatar ? senderInfo : message);
+
+      popoverTargetUser = { uid: senderUid, displayName, avatar: avatarSrc };
+      popoverAvatar.src = avatarSrc;
+      popoverName.textContent = displayName;
+
+      // 重置添加好友按钮状态
+      popoverAddFriend.textContent = '添加好友';
+      popoverAddFriend.style.pointerEvents = 'auto';
+      popoverAddFriend.style.background = '';
+      popoverAddFriend.style.color = '';
+
+      // 判断是否已是好友
+      const isFriend = friends.some(f => f.uid === senderUid);
+      popoverAddFriend.classList.toggle('hidden', isFriend);
+      popoverAlreadyFriend.classList.toggle('hidden', !isFriend);
+
+      // 定位浮窗：相对 .chat-main
+      const chatMain = document.querySelector('.chat-main');
+      const rect = chatMain.getBoundingClientRect();
+      let x = e.clientX - rect.left;
+      let y = e.clientY - rect.top;
+
+      // 边界检测
+      const popW = 200, popH = 160;
+      if (x + popW > chatMain.offsetWidth) x = chatMain.offsetWidth - popW - 10;
+      if (y + popH > chatMain.offsetHeight) y = chatMain.offsetHeight - popH - 10;
+      if (x < 0) x = 10;
+      if (y < 0) y = 10;
+
+      avatarPopover.style.left = x + 'px';
+      avatarPopover.style.top = y + 'px';
+      avatarPopover.classList.add('show');
+    });
   }
 
   // ★ 右键菜单绑定

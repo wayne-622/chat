@@ -473,6 +473,79 @@ body {
   margin-right: 5px;
 }
 
+/* ====== 头像操作浮窗 ====== */
+.avatar-popover {
+  position: absolute;
+  background: white;
+  border: 1px solid #dee2e6;
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+  z-index: 150;
+  min-width: 180px;
+  padding: 12px;
+  display: none;
+  animation: ctxFadeIn 0.15s ease;
+}
+
+.avatar-popover.show { display: block; }
+
+.avatar-popover-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid #eee;
+}
+
+.avatar-popover-img {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid #e8f0fe;
+}
+
+.avatar-popover-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: #333;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 120px;
+}
+
+.avatar-popover-actions { display: flex; flex-direction: column; gap: 4px; }
+
+.avatar-popover-btn {
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #333;
+  transition: background 0.12s, color 0.12s;
+  text-align: center;
+}
+
+.avatar-popover-btn:hover {
+  background-color: #e8f0fe;
+  color: #007bff;
+}
+
+.avatar-popover-btn.hidden { display: none; }
+
+.avatar-popover-btn#popover-mention {
+  background: #007bff;
+  color: white;
+  font-weight: 600;
+}
+
+.avatar-popover-btn#popover-mention:hover {
+  background: #0056b3;
+  color: white;
+}
+
 /* ====== 表情选择器 ====== */
 .emoji-picker {
   position: absolute;
@@ -687,7 +760,8 @@ body {
   transition: opacity 0.2s, color 0.2s;
 }
 
-.friend-list-item:hover .friend-actions-btn { opacity: 1; }
+.friend-list-item:hover .friend-actions-btn,
+.friend-actions-wrap.open .friend-actions-btn { opacity: 1; }
 .friend-actions-btn:hover { color: #007bff; background: rgba(0, 123, 255, 0.1); }
 
 .friend-actions-dropdown {
@@ -705,7 +779,7 @@ body {
   margin-top: 2px;
 }
 
-.friend-actions-wrap:hover .friend-actions-dropdown { display: block; }
+.friend-actions-wrap.open .friend-actions-dropdown { display: block; }
 
 .friend-action-item {
   padding: 8px 14px;
